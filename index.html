@@ -276,8 +276,8 @@ h2 small{font-weight:400;color:var(--muted);font-size:.72rem;letter-spacing:0}
     <table id="predtable"><thead><tr><th>#</th><th>Player</th><th>Exact</th><th>Result</th><th>Pts</th></tr></thead><tbody></tbody></table>
     <h2>Gameweek Winners</h2>
     <div class="gwwin" id="gwwinners"></div>
-    <h2>Master Scoreboard <small>predictions + fantasy combined</small></h2>
-    <table id="mastertable"><thead><tr><th>#</th><th>Player</th><th>Pred</th><th>FPL</th><th>Score</th></tr></thead><tbody></tbody></table>
+    <h2>Master Scoreboard <small>prediction rank + FPL rank — lowest wins</small></h2>
+    <table id="mastertable"><thead><tr><th>#</th><th>Player</th><th>Pred pts</th><th>FPL pts</th><th>Rank sum</th></tr></thead><tbody></tbody></table>
   </section>
 
   <section id="tab-stats" class="hidden">
@@ -625,7 +625,7 @@ function renderBoard(){
   master.forEach(m => m.sum = m.predRank + (m.fplRank ?? (linked+1)));
   master.sort((a,b)=> a.sum - b.sum);
   $("mastertable").querySelector("tbody").innerHTML = master.map((m,i) =>
-    `<tr class="${user&&m.uid===user.uid?"me":""} ${i===0?"rank1":""}"><td>${i+1}</td><td>${m.name}</td><td>${m.pred}</td><td>${m.fpl ?? "—"}</td><td><b>${m.sum}</b></td></tr>`
+    `<tr class="${user&&m.uid===user.uid?"me":""} ${(rows.length||linked)&&i===0?"rank1":""}"><td>${(rows.length||linked)?i+1:"–"}</td><td>${m.name}</td><td>${m.pred}</td><td>${m.fpl ?? "—"}</td><td><b>${(rows.length||linked)?m.sum:"–"}</b></td></tr>`
   ).join("") || `<tr><td colspan="5" class="empty">Sign in and make picks to appear here.</td></tr>`;
 }
 
