@@ -606,9 +606,15 @@ function renderBoard(){
 
   const gws = [...new Set(DATA.fixtures.filter(f=>f.finished).map(f=>f.gw))].sort((a,b)=>a-b);
   $("gwwinners").innerHTML = gws.map(g => {
-    let best = null, bp = -1;
-    for(const [uid,t] of Object.entries(totals)) if((t.gw[g]||0) > bp){ bp = t.gw[g]||0; best = uid; }
-    return best && bp > 0 ? `<div>GW${g} · <b>${userNames[best]||"?"}</b> ${bp} pts</div>` : "";
+    let bp = 0, best = [];
+    for(const [uid,t] of Object.entries(totals)){
+      const p = t.gw[g] || 0;
+      if(p > bp){ bp = p; best = [uid]; } else if(p === bp && p > 0){ best.push(uid); }
+    }
+    if(!best.length) return "";
+    const nm = best.map(u => userNames[u] || "?");
+    const label = nm.length > 1 ? nm.slice(0,-1).join(", ") + " & " + nm[nm.length-1] : nm[0];
+    return `<div>GW${g} · <b>${label}</b> ${bp} pts${nm.length>1?" (joint)":""}</div>`;
   }).join("") || `<div class="empty">No completed gameweeks yet.</div>`;
 
   const fplRows = (DATA.fplLeague && DATA.fplLeague.standings) || [];
