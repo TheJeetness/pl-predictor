@@ -819,6 +819,927 @@ function renderTable(){
     {weekday:"long", day:"numeric", month:"short", hour:"numeric", minute:"2-digit"});
   $("stlock").textContent = locked
     ? "Predictions are locked. Scores update live as results come in — final score in May."
+    : `Entries lock ${lockTime}. Reorder the table, then hit Save. You can keep changing it until the deadline.`;
+  const saved = user ? (userStandings[user.uid] || null) : null;
+  if(!myOrder) myOrder = (saved && saved.length === 20) ? saved.slice() : defaultOrder();
+  const sc = scoreOrder(locked ? (saved || myOrder) : myOrder);
+  const shown = locked ? (saved || myOrder) : myOrder;
+  let bar = "";
+  if(!user && !DEMO){
+    bar = `<div class="stbar"><span class="stnote">Sign in to enter your table.</span></div>`;
+  } else if(!locked){
+    bar = `<div class="stbar">
+      <button class="btn" onclick="saveOrder()">${orderDirty ? "Save table" : "Saved ✓"}</button>
+      <button class="btn ghost" onclick="resetOrder()">Reset to live table</button>
+      <span class="stnote">${saved ? "Entry submitted — edits allowed until the deadline." : "Not submitted yet."}</span>
+    </div>`;
+  } else {
+    bar = `<div class="stbar"><span class="stnote">${saved ? "Your entry is locked in." : "You didn't enter before the deadline."}</span></div>`;
+  }
+  const rows = shown.map((id,i) => {
+    const TM = DATA.teams[id] || {name:"?"};
+    const s = sc ? sc.per[id] : null;
+    const cls = i < 4 ? "ucl" : i >= 17 ? "rel" : "";
+    const arrows = locked ? "" : `<div class="mv">
+        <button onclick="moveTeam(${i},-1)" ${i===0?"disabled":""} aria-label="Move up">▲</button>
+        <button onclick="moveTeam(${i},1)" ${i===shown.length-1?"disabled":""} aria-label="Move down">▼</button>
+      </div>`;
+    const scoreBit = (locked && s)
+      ? `<span class="stdiff">${s.act ? "now " + s.act : ""}</span><span class="stpts ${s.pts?"g":"z"}">${s.pts}</span>`
+      : (s && s.act ? `<span class="stdiff">now ${s.act}</span>` : "");
+    return `<div class="strow ${cls}" style="--tc:${COL(TM.code)}">
+      <span class="pos">${i+1}</span>
+      <img src="${CREST(TM.code)}" alt="" onerror="crestFail(this,'${TM.short||SHORT(TM.name)}','${COL(TM.code)}')">
+      <span class="nm">${TM.name}</span>
+      ${scoreBit}${arrows}
+    </div>`;
+  }).join("");
+  const summary = sc ? `<div class="stbar" style="margin-top:12px">
+      <span class="stnote">Currently worth <b style="color:var(--pl-green)">${sc.total}</b>/115 —
+      ${sc.base} from positions${sc.champ?", +5 champion":""}${sc.top4?", +5 top four":""}${sc.drop?", +5 relegation":""}.
+      ${DATA.fixtures.filter(f=>f.finished).length < 40 ? "Early days, so this will swing wildly." : ""}</span>
+    </div>` : "";
+  $("steditor").innerHTML = bar + rows + summary;
+  const board = Object.keys(userNames).map(uid => {
+    const o = userStandings[uid];
+    const s = o ? scoreOrder(o) : null;
+    return {uid, name:userNames[uid], s};
+  }).sort((a,b) => (b.s ? b.s.total : -1) - (a.s ? a.s.total : -1));
+  $("sttable").querySelector("tbody").innerHTML = board.map((r,i) =>
+    r.s ? `<tr class="${user&&r.uid===user.uid?"me":""} ${i===0?"rank1":""}"><td>${i+1}</td><td>${r.name}</td>
+      <td>${r.s.champ?"✓":"–"}</td><td>${r.s.top4?"✓":"–"}</td><td>${r.s.drop?"✓":"–"}</td><td><b>${r.s.total}</b></td></tr>`
+    : `<tr><td>–</td><td>${r.name}</td><td colspan="4" class="empty">no entry yet</td></tr>`
+  ).join("") || `<tr><td colspan="6" class="empty">Nobody has entered a table yet.</td></tr>`;
+  $("livetable").querySelector("tbody").innerHTML = liveTable().map((r,i) => {
+    const TM = DATA.teams[r.id];
+    return `<tr class="${i===0?"rank1":""}"><td>${i+1}</td><td>${TM.name}</td><td>${r.p}</td><td>${r.w}</td>
+      <td>${r.d}</td><td>${r.l}</td><td>${r.gf-r.ga>0?"+":""}${r.gf-r.ga}</td><td><b>${r.pts}</b></td></tr>`;
+  }).join("");
+}
+
+function renderAll(){ renderFixtures(); renderBoard(); renderStats(); renderFantasy(); renderTable(); }
+
+/* ================================================================
+   SEED — real 2026/27 GW1 fixtures, used until data/data.json loads
+   ================================================================ */
+const SEED = {
+  updated: null, currentGW: 1,
+  teams: {
+    1:{name:"Arsenal",code:3,short:"ARS"},        2:{name:"Aston Villa",code:7,short:"AVL"},
+    3:{name:"Bournemouth",code:91,short:"BOU"},   4:{name:"Brentford",code:94,short:"BRE"},
+    5:{name:"Brighton",code:36,short:"BHA"},      6:{name:"Chelsea",code:8,short:"CHE"},
+    7:{name:"Coventry City",code:9,short:"COV"},  8:{name:"Crystal Palace",code:31,short:"CRY"},
+    9:{name:"Everton",code:11,short:"EVE"},      10:{name:"Fulham",code:54,short:"FUL"},
+    11:{name:"Hull City",code:88,short:"HUL"},   12:{name:"Ipswich Town",code:40,short:"IPS"},
+    13:{name:"Leeds",code:2,short:"LEE"},        14:{name:"Liverpool",code:14,short:"LIV"},
+    15:{name:"Man City",code:43,short:"MCI"},    16:{name:"Man Utd",code:1,short:"MUN"},
+    17:{name:"Newcastle",code:4,short:"NEW"},    18:{name:"Nott'm Forest",code:17,short:"NFO"},
+    19:{name:"Spurs",code:6,short:"TOT"},        20:{name:"Sunderland",code:56,short:"SUN"}
+  },
+  form: {},
+  fixtures: [
+    {id:1,  gw:1, kickoff:"2026-08-21T19:00:00Z", h:1,  a:7,  hs:null, as:null, finished:false},
+    {id:4,  gw:1, kickoff:"2026-08-22T11:30:00Z", h:11, a:16, hs:null, as:null, finished:false},
+    {id:3,  gw:1, kickoff:"2026-08-22T14:00:00Z", h:9,  a:8,  hs:null, as:null, finished:false},
+    {id:5,  gw:1, kickoff:"2026-08-22T14:00:00Z", h:12, a:20, hs:null, as:null, finished:false},
+    {id:6,  gw:1, kickoff:"2026-08-22T14:00:00Z", h:18, a:13, hs:null, as:null, finished:false},
+    {id:2,  gw:1, kickoff:"2026-08-22T16:30:00Z", h:4,  a:19, hs:null, as:null, finished:false},
+    {id:7,  gw:1, kickoff:"2026-08-23T13:00:00Z", h:5,  a:2,  hs:null, as:null, finished:false},
+    {id:8,  gw:1, kickoff:"2026-08-23T13:00:00Z", h:15, a:3,  hs:null, as:null, finished:false},
+    {id:9,  gw:1, kickoff:"2026-08-23T15:30:00Z", h:17, a:14, hs:null, as:null, finished:false},
+    {id:10, gw:1, kickoff:"2026-08-24T19:00:00Z", h:10, a:6,  hs:null, as:null, finished:false}
+  ],
+  odds: {},
+  stats: {},
+  fplLeague: {name:"Devils in the Sky", standings:[
+    {entry:4776105, team:"Chile Con Cavani", player:"Soumyajeet Ghosh", total:0, rank:null},
+    {entry:262633,  team:"Walker FC",        player:"Harry Walker",     total:0, rank:null}
+  ]}
+};
+</script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Devils in the Sky — PL Predictor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<style>
+:root{
+  --pl-purple:#38003c; --pl-green:#00ff85; --pl-pink:#e90052; --pl-cyan:#04f5ff;
+  --bg0:#0a0010; --bg1:#1a0524; --glass:rgba(255,255,255,.055); --glass2:rgba(255,255,255,.09);
+  --stroke:rgba(255,255,255,.11); --text:#f6f2f8; --muted:#a692b4;
+  --win:#00e07a; --draw:#6b6b7d; --loss:#ff3d63;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:'Outfit',system-ui,sans-serif;color:var(--text);min-height:100vh;
+  background:var(--bg0);overflow-x:hidden;
+}
+/* animated aurora background */
+.aurora{position:fixed;inset:0;z-index:-2;overflow:hidden;background:
+  radial-gradient(ellipse 80% 60% at 20% 0%, #4a0d5e 0%, transparent 60%),
+  radial-gradient(ellipse 70% 50% at 85% 15%, #00382b 0%, transparent 55%),
+  radial-gradient(ellipse 90% 70% at 50% 100%, #2a0033 0%, transparent 60%),
+  linear-gradient(180deg,#12001c,#0a0010);}
+.aurora::after{content:"";position:absolute;inset:-50%;
+  background:conic-gradient(from 0deg,transparent,rgba(0,255,133,.07),transparent 30%,rgba(233,0,82,.07),transparent 60%);
+  animation:spin 34s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.grain{position:fixed;inset:0;z-index:-1;opacity:.16;pointer-events:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+
+/* ---------- header ---------- */
+header{position:sticky;top:0;z-index:40;backdrop-filter:blur(18px);
+  background:linear-gradient(90deg,rgba(56,0,60,.82),rgba(20,0,30,.72));
+  border-bottom:1px solid var(--stroke);padding:12px 22px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:11px}
+.ball{width:34px;height:34px;border-radius:50%;background:conic-gradient(from 45deg,var(--pl-green),var(--pl-cyan),var(--pl-pink),var(--pl-green));
+  box-shadow:0 0 22px rgba(0,255,133,.45);animation:float 4s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-5px) rotate(180deg)}}
+.brand h1{font-size:1.15rem;font-weight:900;letter-spacing:-.4px;line-height:1.1}
+.brand h1 em{font-style:normal;background:linear-gradient(92deg,var(--pl-green),var(--pl-cyan));
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.brand small{display:block;font-size:.66rem;color:var(--muted);letter-spacing:2.4px;text-transform:uppercase;font-weight:600}
+.spacer{flex:1}
+.countdown{display:flex;align-items:center;gap:9px;background:var(--glass);border:1px solid var(--stroke);
+  padding:7px 14px;border-radius:30px;font-size:.78rem}
+.countdown .lbl{color:var(--muted);text-transform:uppercase;letter-spacing:1.4px;font-size:.6rem;font-weight:700}
+.countdown .val{font-weight:900;font-variant-numeric:tabular-nums;color:var(--pl-green);font-size:.95rem}
+.userchip{display:flex;align-items:center;gap:9px;background:var(--glass);border:1px solid var(--stroke);
+  padding:6px 8px 6px 6px;border-radius:30px;font-size:.85rem;cursor:pointer;transition:.2s}
+.userchip:hover{background:var(--glass2);transform:translateY(-1px)}
+.avatar{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-weight:900;font-size:.78rem;
+  background:linear-gradient(135deg,var(--pl-pink),var(--pl-purple));color:#fff}
+
+/* ---------- nav ---------- */
+nav{display:flex;gap:6px;padding:16px 20px 0;max-width:1040px;margin:0 auto;flex-wrap:wrap}
+nav button{position:relative;background:var(--glass);border:1px solid var(--stroke);color:var(--muted);
+  padding:9px 20px;font-size:.88rem;font-weight:600;font-family:inherit;cursor:pointer;border-radius:30px;transition:.22s}
+nav button:hover{color:var(--text);background:var(--glass2)}
+nav button.active{color:#0a0010;background:linear-gradient(95deg,var(--pl-green),var(--pl-cyan));
+  border-color:transparent;box-shadow:0 6px 22px rgba(0,255,133,.28)}
+
+main{max-width:1040px;margin:0 auto;padding:20px 16px 70px}
+section{animation:rise .45s cubic-bezier(.2,.8,.3,1)}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+
+.banner{background:linear-gradient(95deg,rgba(233,0,82,.9),rgba(233,0,82,.6));padding:11px 16px;
+  border-radius:14px;margin-bottom:16px;font-size:.83rem;border:1px solid rgba(255,255,255,.14)}
+.banner.info{background:linear-gradient(95deg,rgba(4,120,255,.55),rgba(4,120,255,.28))}
+
+/* ---------- gameweek bar ---------- */
+.gwbar{display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:22px}
+.gwbar button{width:40px;height:40px;border-radius:50%;font-size:1.2rem;cursor:pointer;color:var(--text);
+  background:var(--glass);border:1px solid var(--stroke);transition:.2s;font-family:inherit}
+.gwbar button:hover{background:linear-gradient(135deg,var(--pl-green),var(--pl-cyan));color:#0a0010;transform:scale(1.09)}
+.gwbar select{background:rgba(20,0,30,.9);color:var(--text);border:1px solid var(--stroke);padding:10px 18px;
+  border-radius:30px;font-size:1rem;font-weight:800;font-family:inherit;cursor:pointer}
+
+/* ---------- fixture card ---------- */
+.fixture{position:relative;background:var(--glass);border:1px solid var(--stroke);border-radius:20px;
+  padding:16px 18px;margin-bottom:14px;backdrop-filter:blur(12px);transition:.28s;overflow:hidden}
+/* club-colour wash: home colour bleeds in from the left, away from the right */
+.fixture::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.2;transition:.3s;
+  background:linear-gradient(100deg,var(--ch) -25%,transparent 42%,transparent 58%,var(--ca) 125%)}
+.fixture::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;
+  background:linear-gradient(180deg,var(--ch),var(--ca));opacity:.55;transition:.28s}
+.fixture:hover{transform:translateY(-3px);border-color:rgba(255,255,255,.24);box-shadow:0 16px 44px rgba(0,0,0,.46)}
+.fixture:hover::after{opacity:.34}
+.fixture:hover::before{opacity:1}
+.fixture>*{position:relative;z-index:1}
+.crest.h{filter:drop-shadow(0 0 12px var(--ch)) drop-shadow(0 3px 8px rgba(0,0,0,.55))}
+.crest.a{filter:drop-shadow(0 0 12px var(--ca)) drop-shadow(0 3px 8px rgba(0,0,0,.55))}
+.crestfb{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;
+  font-weight:900;font-size:.7rem;letter-spacing:.5px;color:#fff;border:2px solid rgba(255,255,255,.28);
+  text-shadow:0 1px 3px rgba(0,0,0,.6)}
+.fixture.locked{border-color:rgba(233,0,82,.3)}
+.fixture.done{opacity:.9}
+.fx-top{display:flex;justify-content:space-between;align-items:center;font-size:.72rem;color:var(--muted);
+  margin-bottom:13px;letter-spacing:.4px}
+.tag{padding:3px 10px;border-radius:20px;font-weight:800;font-size:.62rem;text-transform:uppercase;letter-spacing:1.1px}
+.tag.open{background:rgba(0,255,133,.15);color:var(--pl-green);border:1px solid rgba(0,255,133,.32)}
+.tag.lock{background:rgba(233,0,82,.15);color:#ff6b95;border:1px solid rgba(233,0,82,.32)}
+.tag.ft{background:rgba(255,255,255,.1);color:var(--text);border:1px solid var(--stroke)}
+.fx-main{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px}
+.teamcol{display:flex;align-items:center;gap:12px;min-width:0}
+.teamcol.away{flex-direction:row-reverse;text-align:right}
+.crest{width:46px;height:46px;object-fit:contain;filter:drop-shadow(0 3px 10px rgba(0,0,0,.5));transition:.25s;flex-shrink:0}
+.fixture:hover .crest{transform:scale(1.11)}
+.tname{font-weight:700;font-size:1rem;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.form{display:flex;gap:3px;margin-top:5px}
+.teamcol.away .form{justify-content:flex-end}
+.form b{width:17px;height:17px;border-radius:5px;font-size:.58rem;display:grid;place-items:center;color:#fff;font-weight:900}
+.form .W{background:var(--win);box-shadow:0 0 9px rgba(0,224,122,.4)}
+.form .D{background:var(--draw)} .form .L{background:var(--loss)}
+.scorebox{display:flex;align-items:center;gap:7px}
+.scorebox input{width:50px;height:50px;text-align:center;font-size:1.35rem;font-weight:900;font-family:inherit;
+  background:rgba(10,0,16,.75);border:2px solid var(--stroke);border-radius:14px;color:var(--pl-green);transition:.2s}
+.scorebox input:hover:not(:disabled){border-color:rgba(0,255,133,.45)}
+.scorebox input:focus{outline:none;border-color:var(--pl-green);box-shadow:0 0 0 4px rgba(0,255,133,.14)}
+.scorebox input:disabled{opacity:.45;color:var(--muted)}
+.scorebox input::-webkit-outer-spin-button,.scorebox input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.scorebox input[type=number]{-moz-appearance:textfield}
+.dash{color:var(--muted);font-weight:800}
+.pending{font-size:.64rem;color:var(--muted);text-align:center;line-height:1.35;padding:9px 14px;
+  border:1px dashed var(--stroke);border-radius:12px;text-transform:uppercase;letter-spacing:.8px}
+.result{font-size:1.5rem;font-weight:900;padding:8px 16px;border-radius:14px;letter-spacing:1px;
+  background:linear-gradient(135deg,rgba(255,255,255,.13),rgba(255,255,255,.05));border:1px solid var(--stroke)}
+
+/* odds probability bar */
+.probwrap{margin-top:14px}
+.probbar{display:flex;height:7px;border-radius:10px;overflow:hidden;background:rgba(0,0,0,.35)}
+.probbar i{display:block;transition:width .6s cubic-bezier(.2,.8,.3,1)}
+.probbar .ph{background:linear-gradient(90deg,var(--pl-green),#00c46a)}
+.probbar .pd{background:var(--draw)}
+.probbar .pa{background:linear-gradient(90deg,#b249ff,var(--pl-pink))}
+.problbl{display:flex;justify-content:space-between;font-size:.63rem;color:var(--muted);margin-top:5px;letter-spacing:.5px}
+.oddsrow{display:flex;gap:10px;justify-content:center;margin-top:11px;flex-wrap:wrap}
+.bookie{display:flex;align-items:center;gap:7px;background:rgba(0,0,0,.28);border:1px solid var(--stroke);
+  border-radius:10px;padding:5px 11px;font-size:.71rem}
+.bookie .bk{font-weight:800;font-size:.63rem;text-transform:uppercase;letter-spacing:.7px}
+.bookie.sky .bk{color:#04f5ff} .bookie.pp .bk{color:#00ff85}
+.bookie o{font-style:normal;background:rgba(255,255,255,.08);padding:2px 7px;border-radius:6px;font-weight:700}
+.fx-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;
+  padding-top:11px;border-top:1px solid rgba(255,255,255,.07);font-size:.76rem;color:var(--muted);flex-wrap:wrap}
+.saved{color:var(--pl-green);font-weight:700}
+.pts{font-weight:900;padding:3px 11px;border-radius:20px;font-size:.72rem}
+.pts.p3{background:linear-gradient(95deg,var(--pl-green),var(--pl-cyan));color:#0a0010;box-shadow:0 0 18px rgba(0,255,133,.35)}
+.pts.p1{background:rgba(255,255,255,.14);color:var(--text)}
+.pts.p0{background:rgba(233,0,82,.2);color:#ff6b95}
+.otherpicks{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.opick{background:rgba(0,0,0,.3);border:1px solid var(--stroke);border-radius:20px;padding:3px 11px;font-size:.72rem}
+.opick b{color:var(--pl-cyan)}
+
+/* ---------- tables / podium ---------- */
+.podium{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:22px}
+.pod{background:var(--glass);border:1px solid var(--stroke);border-radius:18px;padding:18px 12px;text-align:center;
+  backdrop-filter:blur(12px);transition:.25s;position:relative;overflow:hidden}
+.pod:hover{transform:translateY(-4px);background:var(--glass2)}
+.pod .medal{font-size:1.9rem;line-height:1}
+.pod .nm{font-weight:800;margin-top:7px;font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pod .sc{font-size:1.7rem;font-weight:900;margin-top:3px}
+.pod .sub{font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px}
+.pod.g1{background:linear-gradient(165deg,rgba(0,255,133,.18),var(--glass));border-color:rgba(0,255,133,.4)}
+.pod.g1 .sc{background:linear-gradient(95deg,var(--pl-green),var(--pl-cyan));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+table{width:100%;border-collapse:separate;border-spacing:0;background:var(--glass);border:1px solid var(--stroke);
+  border-radius:16px;overflow:hidden;backdrop-filter:blur(12px)}
+th{background:rgba(0,0,0,.3);padding:11px 14px;text-align:left;font-size:.66rem;text-transform:uppercase;
+  letter-spacing:1.3px;color:var(--muted);font-weight:700}
+td{padding:12px 14px;border-top:1px solid rgba(255,255,255,.06);font-size:.9rem}
+tbody tr{transition:.18s}
+tbody tr:hover{background:rgba(255,255,255,.045)}
+tr.me td{background:rgba(0,255,133,.08);box-shadow:inset 3px 0 0 var(--pl-green)}
+tr.rank1 td:first-child{color:var(--pl-green);font-weight:900}
+h2{margin:26px 0 14px;font-size:1.05rem;font-weight:800;letter-spacing:-.2px;display:flex;align-items:center;gap:10px}
+h2::before{content:"";width:4px;height:19px;border-radius:4px;background:linear-gradient(180deg,var(--pl-green),var(--pl-cyan))}
+h2:first-child{margin-top:0}
+h2 small{font-weight:400;color:var(--muted);font-size:.72rem;letter-spacing:0}
+.gwwin{display:flex;flex-wrap:wrap;gap:9px}
+.gwwin div{background:var(--glass);border:1px solid var(--stroke);border-radius:12px;padding:8px 13px;font-size:.8rem}
+.gwwin b{color:var(--pl-green)}
+
+/* ---------- final table game ---------- */
+.strow{display:flex;align-items:center;gap:11px;background:var(--glass);border:1px solid var(--stroke);
+  border-radius:12px;padding:7px 11px;margin-bottom:6px;transition:.18s;position:relative;overflow:hidden}
+.strow::after{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--tc);opacity:.9}
+.strow:hover{background:var(--glass2)}
+.strow .pos{width:24px;text-align:center;font-weight:900;color:var(--muted);font-size:.85rem;flex-shrink:0}
+.strow img{width:26px;height:26px;object-fit:contain;flex-shrink:0}
+.strow .nm{font-weight:700;font-size:.9rem;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.strow .mv{display:flex;gap:4px;flex-shrink:0}
+.strow .mv button{width:26px;height:26px;border-radius:7px;background:rgba(0,0,0,.3);border:1px solid var(--stroke);
+  color:var(--text);cursor:pointer;font-size:.7rem;font-family:inherit;line-height:1;padding:0}
+.strow .mv button:hover:not(:disabled){background:var(--pl-green);color:#0a0010}
+.strow .mv button:disabled{opacity:.25;cursor:default}
+.stbar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+.stnote{font-size:.72rem;color:var(--muted)}
+.stpts{margin-left:auto;font-weight:900;font-size:.8rem;flex-shrink:0}
+.stpts.g{color:var(--pl-green)} .stpts.z{color:var(--muted)}
+.stdiff{font-size:.68rem;color:var(--muted);flex-shrink:0;min-width:36px;text-align:right}
+
+/* ---------- stats ---------- */
+.watch{position:relative;display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin-bottom:22px;padding:22px;
+  border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.16);
+  background:linear-gradient(120deg,rgba(56,0,60,.95),rgba(233,0,82,.55),rgba(4,245,255,.18))}
+.watch::after{content:"";position:absolute;inset:-50%;background:conic-gradient(from 90deg,transparent,rgba(255,255,255,.12),transparent 35%);animation:spin 12s linear infinite}
+.watch>*{position:relative;z-index:1}
+.watch img{width:96px;height:122px;object-fit:cover;border-radius:14px;border:2px solid rgba(0,255,133,.6);
+  box-shadow:0 10px 34px rgba(0,0,0,.5);background:rgba(0,0,0,.3)}
+.wtag{display:inline-block;background:var(--pl-green);color:#0a0010;font-weight:900;font-size:.62rem;
+  padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:1.5px}
+.watch h3{font-size:1.6rem;font-weight:900;margin:9px 0 3px;letter-spacing:-.5px}
+.watch p{font-size:.85rem;color:rgba(255,255,255,.88)}
+.statgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(285px,1fr));gap:16px}
+.statcard{background:var(--glass);border:1px solid var(--stroke);border-radius:20px;padding:18px;backdrop-filter:blur(12px);transition:.25s}
+.statcard:hover{background:var(--glass2);transform:translateY(-3px)}
+.statcard h3{font-size:.72rem;text-transform:uppercase;letter-spacing:1.6px;color:var(--muted);margin-bottom:14px;font-weight:700}
+.prow{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.prow:last-child{border-bottom:none}
+.prow img{width:40px;height:50px;object-fit:cover;border-radius:9px;background:rgba(0,0,0,.3);flex-shrink:0}
+.prow .pn{font-weight:700;font-size:.9rem}
+.prow .pt{font-size:.71rem;color:var(--muted)}
+.prow .pv{margin-left:auto;font-weight:900;font-size:1.1rem;
+  background:linear-gradient(95deg,var(--pl-green),var(--pl-cyan));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.empty{color:var(--muted);font-size:.82rem;padding:6px 0}
+
+/* ---------- modals ---------- */
+.modal{position:fixed;inset:0;background:rgba(4,0,8,.78);backdrop-filter:blur(8px);display:grid;place-items:center;z-index:60;padding:16px}
+.modal .box{background:linear-gradient(165deg,rgba(40,4,52,.98),rgba(16,0,24,.98));border:1px solid var(--stroke);
+  padding:28px;border-radius:24px;width:370px;max-width:100%;box-shadow:0 30px 80px rgba(0,0,0,.6);animation:rise .3s}
+.modal h3{margin-bottom:16px;font-size:1.25rem;font-weight:800}
+.modal input{width:100%;padding:12px 14px;margin-bottom:11px;background:rgba(0,0,0,.4);border:1px solid var(--stroke);
+  border-radius:12px;color:var(--text);font-size:.93rem;font-family:inherit;transition:.2s}
+.modal input:focus{outline:none;border-color:var(--pl-green);box-shadow:0 0 0 4px rgba(0,255,133,.12)}
+.hint{font-size:.71rem;color:var(--muted);margin:-4px 0 12px;line-height:1.5}
+.btn{background:linear-gradient(95deg,var(--pl-green),var(--pl-cyan));color:#0a0010;border:none;padding:11px 20px;
+  border-radius:12px;font-weight:800;cursor:pointer;font-size:.88rem;font-family:inherit;transition:.2s}
+.btn:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(0,255,133,.3)}
+.btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--stroke)}
+.btn.ghost:hover{color:var(--text);background:var(--glass);box-shadow:none}
+.row{display:flex;gap:9px;margin-top:8px;flex-wrap:wrap}
+.err{color:#ff6b95;font-size:.79rem;margin-bottom:9px;min-height:1em}
+.hidden{display:none!important}
+.updated{text-align:center;color:var(--muted);font-size:.7rem;margin-top:34px;letter-spacing:.5px}
+@media(max-width:600px){
+  .crest{width:34px;height:34px} .tname{font-size:.82rem} .scorebox input{width:42px;height:42px;font-size:1.15rem}
+  .teamcol{gap:8px} nav button{padding:8px 15px;font-size:.8rem} .brand h1{font-size:1rem}
+  .podium{grid-template-columns:1fr;gap:9px} .pod{display:flex;align-items:center;gap:14px;text-align:left;padding:13px}
+  .pod .sc{margin:0 0 0 auto} .watch img{width:74px;height:94px}
+}
+</style>
+</head>
+<body>
+<div class="aurora"></div><div class="grain"></div>
+
+<header>
+  <div class="brand">
+    <div class="ball"></div>
+    <div>
+      <h1>Devils in the <em>Sky</em></h1>
+      <small>Premier League Predictor</small>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <div class="countdown" id="countdown"><span class="lbl">Next kickoff</span><span class="val" id="cdval">—</span></div>
+  <button class="btn ghost" id="newsbtn" style="padding:7px 13px;font-size:.75rem">What's new</button>
+  <div class="userchip" id="userchip"><div class="avatar" id="avatar">?</div><span id="uname">Sign in</span></div>
+</header>
+
+<nav>
+  <button data-tab="predict" class="active">⚽ Predictions</button>
+  <button data-tab="board">🏆 Leaderboard</button>
+  <button data-tab="stats">📊 Stats</button>
+  <button data-tab="fantasy">🎮 Fantasy</button>
+  <button data-tab="table">📋 Final Table</button>
+</nav>
+
+<main>
+  <div id="banner" class="banner hidden"></div>
+
+  <section id="tab-predict">
+    <div class="gwbar">
+      <button id="gwprev">‹</button>
+      <select id="gwsel"></select>
+      <button id="gwnext">›</button>
+    </div>
+    <div id="fixtures"></div>
+  </section>
+
+  <section id="tab-board" class="hidden">
+    <div class="podium" id="podium"></div>
+    <h2>Prediction League</h2>
+    <table id="predtable"><thead><tr><th>#</th><th>Player</th><th>Exact</th><th>Result</th><th>Pts</th></tr></thead><tbody></tbody></table>
+    <h2>Gameweek Winners</h2>
+    <div class="gwwin" id="gwwinners"></div>
+    <h2>Master Scoreboard <small>prediction rank + FPL rank — lowest wins</small></h2>
+    <table id="mastertable"><thead><tr><th>#</th><th>Player</th><th>Pred pts</th><th>FPL pts</th><th>Table pts</th><th>Rank sum</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section id="tab-stats" class="hidden">
+    <div class="watch hidden" id="watchcard"></div>
+    <div class="statgrid">
+      <div class="statcard"><h3>🥅 Top Scorers</h3><div id="scorers"></div></div>
+      <div class="statcard"><h3>🎯 Most Assists</h3><div id="assists"></div></div>
+      <div class="statcard"><h3>🧤 Clean Sheets</h3><div id="cleans"></div></div>
+      <div class="statcard"><h3>🔥 In Form</h3><div id="inform"></div></div>
+      <div class="statcard"><h3>👥 Most Picked in FPL</h3><div id="picked"></div></div>
+    </div>
+  </section>
+
+  <section id="tab-fantasy" class="hidden">
+    <h2 id="fplname">FPL Mini-League</h2>
+    <div id="fplhint" class="banner info hidden">No mini-league data yet — run the Update Data action in GitHub.</div>
+    <table id="fpltable"><thead><tr><th>#</th><th>Team</th><th>Manager</th><th>Total</th></tr></thead><tbody></tbody></table>
+    <p class="hint" style="margin-top:12px">Join link: <a href="https://fantasy.premierleague.com/leagues/auto-join/t9yxf2" style="color:var(--pl-cyan)">fantasy.premierleague.com/leagues/auto-join/t9yxf2</a> · Add your FPL Entry ID in your profile to appear on the master scoreboard.</p>
+  </section>
+
+  <section id="tab-table" class="hidden">
+    <div id="stlock" class="banner info"></div>
+    <div id="steditor"></div>
+    <h2>Standings League <small>5 pts per team, minus places off · +5 champion · +5 top four · +5 relegation</small></h2>
+    <table id="sttable"><thead><tr><th>#</th><th>Player</th><th>Champ</th><th>Top 4</th><th>Drop</th><th>Total</th></tr></thead><tbody></tbody></table>
+    <h2>Live Premier League Table</h2>
+    <table id="livetable"><thead><tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <div class="updated" id="updated"></div>
+</main>
+
+<div class="modal hidden" id="authmodal">
+  <div class="box">
+    <h3 id="authtitle">Welcome back</h3>
+    <div class="err" id="autherr"></div>
+    <input id="f_name" placeholder="Display name" class="hidden">
+    <input id="f_email" type="email" placeholder="Email">
+    <input id="f_pass" type="password" placeholder="Password (6+ characters)">
+    <div class="row">
+      <button class="btn" id="doauth">Sign in</button>
+      <button class="btn ghost" id="switchauth">Create account</button>
+      <button class="btn ghost" id="closeauth">✕</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="newsmodal">
+  <div class="box" style="width:440px">
+    <h3>What's new</h3>
+    <div id="newslist" style="max-height:60vh;overflow-y:auto"></div>
+    <div class="row"><button class="btn ghost" id="closenews">Close</button></div>
+  </div>
+</div>
+
+<div class="modal hidden" id="profilemodal">
+  <div class="box">
+    <h3>Your profile</h3>
+    <div class="err" id="proferr"></div>
+    <input id="p_name" placeholder="Display name">
+    <input id="p_fpl" placeholder="FPL Entry ID (optional)">
+    <div class="hint">On fantasy.premierleague.com open <b>Points</b> — the number in the URL <code>/entry/XXXXX/</code> is your Entry ID. It links your FPL score to the master scoreboard.</div>
+    <div class="row">
+      <button class="btn" id="saveprofile">Save</button>
+      <button class="btn ghost" id="signout">Sign out</button>
+      <button class="btn ghost" id="closeprofile">✕</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ================================================================
+   CONFIG — paste your Firebase web config here (Setup Guide, Part 2)
+   ================================================================ */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCuDeVJtwp85wr8_rERu4FayXPSEri6A6U",
+  authDomain: "pl-predictor-bf2c8.firebaseapp.com",
+  projectId: "pl-predictor-bf2c8",
+  storageBucket: "pl-predictor-bf2c8.firebasestorage.app",
+  messagingSenderId: "652006292689",
+  appId: "1:652006292689:web:bb9e87b4a56593fff6d9f0"
+};
+
+/* club colours, keyed by Premier League team code (stable across seasons) */
+const CLUB = {
+  3:"#EF0107",  7:"#95BFE5", 91:"#DA291C", 94:"#E30613", 36:"#0057B8",
+  8:"#034694",  9:"#78D0F3", 31:"#1B458F", 11:"#003399", 54:"#E4002B",
+  88:"#F5A12D", 40:"#3A64A3",  2:"#FFCD00", 14:"#C8102E", 43:"#6CABDD",
+  1:"#DA291C",  4:"#B9C2C8", 17:"#DD0000",  6:"#3C5BA8", 56:"#EB172B"
+};
+const COL = c => CLUB[c] || "#7a6b85";
+/* if a badge image ever fails, swap in a club-coloured initials disc */
+function crestFail(img, short, colour){
+  const d = document.createElement("div");
+  d.className = "crestfb"; d.textContent = short;
+  d.style.background = colour;
+  img.replaceWith(d);
+}
+const SHORT = n => (n||"?").replace(/[^A-Za-z ]/g,"").split(" ")
+  .map(w=>w[0]).join("").slice(0,3).toUpperCase() || "?";
+const CREST = c => `https://resources.premierleague.com/premierleague/badges/70/t${c}.png`;
+const PHOTO = p => `https://resources.premierleague.com/premierleague/photos/players/110x140/p${p}.png`;
+const DEMO = FIREBASE_CONFIG.apiKey.startsWith("PASTE");
+const $ = id => document.getElementById(id);
+
+let DATA = null, user = null, profile = {}, myPicks = {}, allPicks = [],
+    userNames = {}, userFpl = {}, userStandings = {}, curGW = 1, db = null, auth = null,
+    demoPicks = {}, registering = false;
+
+/* ---------- boot ---------- */
+init();
+async function init(){
+  if(!DEMO){
+    firebase.initializeApp(FIREBASE_CONFIG);
+    auth = firebase.auth(); db = firebase.firestore();
+    auth.onAuthStateChanged(async u => { user = u; await onAuthChange(); });
+  } else {
+    banner("Demo mode — Firebase config not pasted yet, so sign-in is off and picks aren't saved. See SETUP-GUIDE.md.", false);
+  }
+  updateUserUI();
+  await loadData();
+  buildGWBar();
+  renderAll();
+  tickCountdown(); setInterval(tickCountdown, 1000);
+}
+
+async function loadData(){
+  try{
+    const r = await fetch("data/data.json?cb=" + Date.now());
+    if(!r.ok) throw 0;
+    DATA = await r.json();
+  }catch(e){
+    DATA = SEED;
+  }
+  curGW = DATA.currentGW || 1;
+  $("updated").textContent = DATA.updated
+    ? "Data updated " + new Date(DATA.updated).toLocaleString()
+    : "Showing built-in fixture list — live data loads after the first GitHub Action run";
+}
+
+function banner(msg, info){
+  const b = $("banner"); b.textContent = msg; b.classList.remove("hidden"); b.classList.toggle("info", !!info);
+}
+
+/* ---------- countdown ---------- */
+function tickCountdown(){
+  if(!DATA) return;
+  const next = DATA.fixtures.filter(f => new Date(f.kickoff) > new Date())
+                            .sort((a,b)=> new Date(a.kickoff) - new Date(b.kickoff))[0];
+  if(!next){ $("cdval").textContent = "—"; return; }
+  let ms = new Date(next.kickoff) - new Date();
+  const d = Math.floor(ms/864e5), h = Math.floor(ms/36e5)%24, m = Math.floor(ms/6e4)%60, s = Math.floor(ms/1e3)%60;
+  $("cdval").textContent = d > 0 ? `${d}d ${h}h ${m}m` : `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+}
+
+/* ---------- changelog ---------- */
+const CHANGELOG = [
+  ["22 Aug 2026", [
+    "New Final Table game — predict the 20-team finishing order. Locks Fri 28 Aug, 1:30pm ET.",
+    "Results now appear at full time instead of hours later.",
+    "Locked matches no longer show your own pick where the score goes — that was confusing people (sorry).",
+    "Joint gameweek winners are now both named instead of one picked at random."
+  ]],
+  ["20 Aug 2026", [
+    "Master scoreboard hides the rank sum until GW1 has been played.",
+    "Fixed Coventry's badge, which was showing the wrong club.",
+    "Site went live with predictions, leaderboard, stats and the FPL mini-league."
+  ]]
+];
+$("newsbtn").onclick = () => {
+  $("newslist").innerHTML = CHANGELOG.map(([date, items]) => `
+    <div style="margin-bottom:16px">
+      <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:1.4px;color:var(--pl-green);font-weight:700;margin-bottom:6px">${date}</div>
+      ${items.map(i => `<div style="font-size:.83rem;color:var(--muted);padding:3px 0 3px 12px;border-left:1px solid var(--stroke);line-height:1.5">${i}</div>`).join("")}
+    </div>`).join("");
+  $("newsmodal").classList.remove("hidden");
+};
+$("closenews").onclick = () => $("newsmodal").classList.add("hidden");
+
+/* ---------- auth ---------- */
+$("userchip").onclick = () => {
+  if(DEMO){ alert("Demo mode — paste your Firebase config into index.html to enable sign-in."); return; }
+  user ? openProfile() : $("authmodal").classList.remove("hidden");
+};
+$("closeauth").onclick = () => $("authmodal").classList.add("hidden");
+$("switchauth").onclick = () => {
+  registering = !registering;
+  $("f_name").classList.toggle("hidden", !registering);
+  $("authtitle").textContent = registering ? "Create your account" : "Welcome back";
+  $("doauth").textContent = registering ? "Register" : "Sign in";
+  $("switchauth").textContent = registering ? "I have an account" : "Create account";
+};
+$("doauth").onclick = async () => {
+  const email = $("f_email").value.trim(), pass = $("f_pass").value;
+  $("autherr").textContent = "";
+  try{
+    if(registering){
+      const name = $("f_name").value.trim();
+      if(!name){ $("autherr").textContent = "Pick a display name"; return; }
+      const cred = await auth.createUserWithEmailAndPassword(email, pass);
+      await db.collection("users").doc(cred.user.uid).set({name});
+    } else await auth.signInWithEmailAndPassword(email, pass);
+    $("authmodal").classList.add("hidden");
+  }catch(e){ $("autherr").textContent = e.message; }
+};
+function openProfile(){
+  $("p_name").value = profile.name || ""; $("p_fpl").value = profile.fplEntry || "";
+  $("profilemodal").classList.remove("hidden");
+}
+$("closeprofile").onclick = () => $("profilemodal").classList.add("hidden");
+$("signout").onclick = async () => { await auth.signOut(); $("profilemodal").classList.add("hidden"); };
+$("saveprofile").onclick = async () => {
+  try{
+    profile.name = $("p_name").value.trim() || profile.name;
+    profile.fplEntry = $("p_fpl").value.trim();
+    await db.collection("users").doc(user.uid).set(profile, {merge:true});
+    $("profilemodal").classList.add("hidden");
+    await refreshUsers(); updateUserUI(); renderAll();
+  }catch(e){ $("proferr").textContent = e.message; }
+};
+async function onAuthChange(){
+  if(user){
+    const doc = await db.collection("users").doc(user.uid).get();
+    profile = doc.exists ? doc.data() : {name: user.email.split("@")[0]};
+    await refreshUsers(); await refreshPicks();
+  } else { profile = {}; myPicks = {}; allPicks = []; }
+  myOrder = null; orderDirty = false;
+  updateUserUI(); renderAll();
+}
+function updateUserUI(){
+  const n = user ? (profile.name || user.email) : (DEMO ? "Demo mode" : "Sign in");
+  $("uname").textContent = n;
+  $("avatar").textContent = (n[0] || "?").toUpperCase();
+}
+async function refreshUsers(){
+  const snap = await db.collection("users").get();
+  userNames = {}; userFpl = {}; userStandings = {};
+  snap.forEach(d => {
+    const v = d.data();
+    userNames[d.id] = v.name; userFpl[d.id] = v.fplEntry || null;
+    if(Array.isArray(v.standings) && v.standings.length === 20) userStandings[d.id] = v.standings;
+  });
+}
+async function refreshPicks(){
+  const snap = await db.collection("picks").get();
+  allPicks = []; myPicks = {};
+  snap.forEach(d => { const p = d.data(); allPicks.push(p); if(user && p.uid === user.uid) myPicks[p.fid] = p; });
+}
+
+/* ---------- tabs ---------- */
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.remove("active"));
+  b.classList.add("active");
+  ["predict","board","stats","fantasy","table"].forEach(t => $("tab-"+t).classList.toggle("hidden", t !== b.dataset.tab));
+});
+
+/* ---------- gameweeks ---------- */
+function buildGWBar(){
+  const gws = [...new Set(DATA.fixtures.map(f => f.gw))].sort((a,b)=>a-b);
+  const sel = $("gwsel");
+  sel.innerHTML = gws.map(g => `<option value="${g}">Gameweek ${g}</option>`).join("");
+  sel.value = curGW;
+  sel.onchange = () => { curGW = +sel.value; renderFixtures(); };
+  $("gwprev").onclick = () => { if(curGW > gws[0]){ curGW--; sel.value = curGW; renderFixtures(); } };
+  $("gwnext").onclick = () => { if(curGW < gws[gws.length-1]){ curGW++; sel.value = curGW; renderFixtures(); } };
+}
+
+function pickPoints(pick, fx){
+  if(!fx.finished || pick.h === "" || pick.h == null || pick.a === "" || pick.a == null) return null;
+  const ph = +pick.h, pa = +pick.a;
+  if(ph === fx.hs && pa === fx.as) return 3;
+  return Math.sign(ph - pa) === Math.sign(fx.hs - fx.as) ? 1 : 0;
+}
+
+/* ---------- fixtures ---------- */
+function renderFixtures(){
+  const fxs = DATA.fixtures.filter(f => f.gw === curGW).sort((a,b)=> new Date(a.kickoff) - new Date(b.kickoff));
+  const now = Date.now();
+  $("fixtures").innerHTML = fxs.map(fx => {
+    const H = DATA.teams[fx.h] || {name:"?"}, A = DATA.teams[fx.a] || {name:"?"};
+    const locked = now >= new Date(fx.kickoff).getTime();
+    const pick = DEMO ? (demoPicks[fx.id] || {}) : (myPicks[fx.id] || {});
+    const odds = (DATA.odds || {})[fx.id];
+    const pts = pickPoints(pick, fx);
+    const others = locked ? allPicks.filter(p => p.fid === fx.id && (!user || p.uid !== user.uid)) : [];
+    const hasPick = pick.h != null && pick.h !== "" && pick.a != null && pick.a !== "";
+    return `
+    <div class="fixture ${locked?"locked":""} ${fx.finished?"done":""}" style="--ch:${COL(H.code)};--ca:${COL(A.code)}">
+      <div class="fx-top">
+        <span>${new Date(fx.kickoff).toLocaleString(undefined,{weekday:"short",day:"numeric",month:"short",hour:"numeric",minute:"2-digit"})}</span>
+        <span class="tag ${fx.finished?"ft":locked?"lock":"open"}">${fx.finished?"Full time":locked?"🔒 Locked":"Open"}</span>
+      </div>
+      <div class="fx-main">
+        <div class="teamcol">
+          <img class="crest h" src="${CREST(H.code)}" alt="${H.name}" onerror="crestFail(this,'${H.short||SHORT(H.name)}','${COL(H.code)}')">
+          <div style="min-width:0"><div class="tname">${H.name}</div><div class="form">${formHTML(fx.h)}</div></div>
+        </div>
+        <div class="scorebox">
+          ${fx.finished
+            ? `<span class="result">${fx.hs} – ${fx.as}</span>`
+            : locked
+              ? `<span class="pending">awaiting<br>result</span>`
+              : `<input type="number" min="0" max="15" inputmode="numeric" value="${pick.h ?? ""}" onchange="savePick(${fx.id},'h',this.value)">
+                 <span class="dash">–</span>
+                 <input type="number" min="0" max="15" inputmode="numeric" value="${pick.a ?? ""}" onchange="savePick(${fx.id},'a',this.value)">`}
+        </div>
+        <div class="teamcol away">
+          <img class="crest a" src="${CREST(A.code)}" alt="${A.name}" onerror="crestFail(this,'${A.short||SHORT(A.name)}','${COL(A.code)}')">
+          <div style="min-width:0"><div class="tname">${A.name}</div><div class="form">${formHTML(fx.a)}</div></div>
+        </div>
+      </div>
+      ${odds ? oddsHTML(odds, H.name, A.name) : ""}
+      <div class="fx-foot">
+        <span>${hasPick ? `<span class="saved">Your pick ${pick.h}–${pick.a}</span>` : (locked ? "No prediction made" : "Enter your prediction")}</span>
+        ${pts != null ? `<span class="pts p${pts}">${pts===3?"PERFECT +3":pts===1?"+1 result":"0 pts"}</span>` : ""}
+      </div>
+      ${others.length ? `<div class="otherpicks">${others.map(p => `<span class="opick"><b>${userNames[p.uid]||"?"}</b> ${p.h}–${p.a}</span>`).join("")}</div>` : ""}
+    </div>`;
+  }).join("") || `<p class="empty" style="text-align:center">No fixtures in this gameweek.</p>`;
+}
+function formHTML(t){ return ((DATA.form||{})[t] || []).map(r => `<b class="${r}">${r}</b>`).join(""); }
+function oddsHTML(o, hn, an){
+  const src = o.skybet || o.paddypower;
+  const [h,d,a] = src.map(Number);
+  const inv = [1/h, 1/d, 1/a], tot = inv[0]+inv[1]+inv[2];
+  const pc = inv.map(v => Math.round(v/tot*100));
+  const bk = (tag, cls, name) => o[tag] ? `<div class="bookie ${cls}"><span class="bk">${name}</span><o>${o[tag][0]}</o><o>${o[tag][1]}</o><o>${o[tag][2]}</o></div>` : "";
+  return `<div class="probwrap">
+    <div class="probbar"><i class="ph" style="width:${pc[0]}%"></i><i class="pd" style="width:${pc[1]}%"></i><i class="pa" style="width:${pc[2]}%"></i></div>
+    <div class="problbl"><span>${hn} ${pc[0]}%</span><span>Draw ${pc[1]}%</span><span>${an} ${pc[2]}%</span></div>
+    <div class="oddsrow">${bk("skybet","sky","Sky Bet")}${bk("paddypower","pp","Paddy Power")}</div>
+  </div>`;
+}
+
+async function savePick(fid, side, val){
+  const fx = DATA.fixtures.find(f => f.id === fid);
+  if(Date.now() >= new Date(fx.kickoff).getTime()){ alert("This match has kicked off — picks are locked."); renderFixtures(); return; }
+  if(DEMO){
+    demoPicks[fid] = demoPicks[fid] || {h:"",a:"",fid,gw:fx.gw};
+    demoPicks[fid][side] = val === "" ? "" : +val;
+    renderFixtures(); return;
+  }
+  if(!user){ $("authmodal").classList.remove("hidden"); return; }
+  const cur = myPicks[fid] || {uid:user.uid, fid, gw:fx.gw, h:"", a:""};
+  cur[side] = val === "" ? "" : +val;
+  myPicks[fid] = cur;
+  await db.collection("picks").doc(`${user.uid}_${fid}`).set(cur);
+  const i = allPicks.findIndex(p => p.uid === user.uid && p.fid === fid);
+  i >= 0 ? allPicks[i] = cur : allPicks.push(cur);
+  renderFixtures();
+}
+
+/* ---------- leaderboard ---------- */
+function renderBoard(){
+  const totals = {};
+  for(const p of allPicks){
+    const fx = DATA.fixtures.find(f => f.id === p.fid);
+    if(!fx) continue;
+    const pts = pickPoints(p, fx);
+    if(pts == null) continue;
+    const t = totals[p.uid] = totals[p.uid] || {exact:0,result:0,pts:0,gw:{}};
+    if(pts === 3) t.exact++; else if(pts === 1) t.result++;
+    t.pts += pts; t.gw[fx.gw] = (t.gw[fx.gw]||0) + pts;
+  }
+  const rows = Object.entries(totals).sort((a,b)=> b[1].pts - a[1].pts || b[1].exact - a[1].exact);
+
+  const medals = ["🥇","🥈","🥉"];
+  $("podium").innerHTML = rows.slice(0,3).map(([uid,t],i) =>
+    `<div class="pod ${i===0?"g1":""}"><div class="medal">${medals[i]}</div><div class="nm">${userNames[uid]||"?"}</div>
+     <div class="sc">${t.pts}</div><div class="sub">${t.exact} exact</div></div>`).join("");
+
+  $("predtable").querySelector("tbody").innerHTML = rows.map(([uid,t],i) =>
+    `<tr class="${user&&uid===user.uid?"me":""} ${i===0?"rank1":""}"><td>${i+1}</td><td>${userNames[uid]||"?"}</td><td>${t.exact}</td><td>${t.result}</td><td><b>${t.pts}</b></td></tr>`
+  ).join("") || `<tr><td colspan="5" class="empty">No scored predictions yet — the table fills in once GW1 is played.</td></tr>`;
+
+  const gws = [...new Set(DATA.fixtures.filter(f=>f.finished).map(f=>f.gw))].sort((a,b)=>a-b);
+  $("gwwinners").innerHTML = gws.map(g => {
+    let bp = 0, best = [];
+    for(const [uid,t] of Object.entries(totals)){
+      const p = t.gw[g] || 0;
+      if(p > bp){ bp = p; best = [uid]; } else if(p === bp && p > 0){ best.push(uid); }
+    }
+    if(!best.length) return "";
+    const nm = best.map(u => userNames[u] || "?");
+    const label = nm.length > 1 ? nm.slice(0,-1).join(", ") + " & " + nm[nm.length-1] : nm[0];
+    return `<div>GW${g} · <b>${label}</b> ${bp} pts${nm.length>1?" (joint)":""}</div>`;
+  }).join("") || `<div class="empty">No completed gameweeks yet.</div>`;
+
+  const fplRows = (DATA.fplLeague && DATA.fplLeague.standings) || [];
+  const byEntry = {}; fplRows.forEach(s => byEntry[String(s.entry)] = s);
+  const predRank = {}; rows.forEach(([uid],i) => predRank[uid] = i+1);
+  const n = Math.max(Object.keys(userNames).length, 1);
+  const master = Object.keys(userNames).map(uid => {
+    const t = totals[uid] || {pts:0};
+    const f = userFpl[uid] ? byEntry[String(userFpl[uid])] : null;
+    const st = userStandings[uid] ? scoreOrder(userStandings[uid]) : null;
+    return {uid, name:userNames[uid], pred:t.pts, predRank:predRank[uid]||n,
+            fpl:f?f.total:null, fplRank:f&&f.rank?f.rank:null,
+            tbl: st ? st.total : null};
+  });
+  const linked = master.filter(m => m.fplRank != null).length;
+  master.forEach(m => m.sum = m.predRank + (m.fplRank ?? (linked+1)));
+  master.sort((a,b)=> a.sum - b.sum);
+  $("mastertable").querySelector("tbody").innerHTML = master.map((m,i) =>
+    `<tr class="${user&&m.uid===user.uid?"me":""} ${(rows.length||linked)&&i===0?"rank1":""}"><td>${(rows.length||linked)?i+1:"–"}</td><td>${m.name}</td><td>${m.pred}</td><td>${m.fpl ?? "—"}</td><td><b>${(rows.length||linked)?m.sum:"–"}</b></td></tr>`
+  ).join("") || `<tr><td colspan="5" class="empty">Sign in and make picks to appear here.</td></tr>`;
+}
+
+/* ---------- stats ---------- */
+function renderStats(){
+  const S = DATA.stats || {};
+  const list = a => (a||[]).map(p => `
+    <div class="prow">
+      <img src="${PHOTO(p.p)}" alt="" onerror="this.style.visibility='hidden'">
+      <div><div class="pn">${p.n}</div><div class="pt">${(DATA.teams[p.t]||{}).name||""}</div></div>
+      <div class="pv">${p.v}</div>
+    </div>`).join("") || `<div class="empty">Fills in once games are played.</div>`;
+  $("scorers").innerHTML = list(S.scorers);
+  $("assists").innerHTML = list(S.assists);
+  $("cleans").innerHTML  = list(S.cleanSheets);
+  $("inform").innerHTML  = list(S.inForm);
+  $("picked").innerHTML  = list(S.mostPicked);
+  const w = S.watch;
+  $("watchcard").classList.toggle("hidden", !w);
+  if(w) $("watchcard").innerHTML = `
+    <img src="${PHOTO(w.p)}" alt="" onerror="this.style.visibility='hidden'">
+    <div>
+      <span class="wtag">⭐ Player to Watch</span>
+      <h3>${w.n}</h3>
+      <p>${(DATA.teams[w.t]||{}).name||""} · Form ${w.form} · ${w.pts} pts</p>
+      <p>${w.why||""}</p>
+    </div>`;
+}
+
+/* ---------- fantasy ---------- */
+function renderFantasy(){
+  const L = DATA.fplLeague, has = L && L.standings && L.standings.length;
+  $("fplhint").classList.toggle("hidden", !!has);
+  if(has) $("fplname").innerHTML = `${L.name} <small>FPL mini-league</small>`;
+  let html = has ? L.standings.map(s =>
+    `<tr class="${s.rank===1?"rank1":""}"><td>${s.rank ?? "–"}</td><td>${s.team}</td><td>${s.player}</td><td><b>${s.total}</b></td></tr>`
+  ).join("") : "";
+  if(has && L.standings.every(s => s.rank == null))
+    html += `<tr><td colspan="4" class="empty">Ranks appear once GW1 is scored.</td></tr>`;
+  $("fpltable").querySelector("tbody").innerHTML = html;
+}
+
+/* ================================================================
+   FINAL TABLE GAME
+   Predict the 20-team finishing order before the GW2 deadline.
+   Scoring per team: 5 - |predicted - actual|, floored at 0  (max 100)
+   Bonuses: +5 champion, +5 exact top four, +5 all three relegated
+   ================================================================ */
+const STANDINGS_LOCK = "2026-08-28T17:30:00Z";   // GW2 deadline
+const stLocked = () => Date.now() >= new Date(STANDINGS_LOCK).getTime();
+let myOrder = null, orderDirty = false;
+
+function liveTable(){
+  const t = {};
+  for(const id of Object.keys(DATA.teams)) t[id] = {id:+id, p:0,w:0,d:0,l:0,gf:0,ga:0,pts:0};
+  for(const f of DATA.fixtures){
+    if(!f.finished || f.hs == null || f.as == null) continue;
+    const H = t[f.h], A = t[f.a];
+    if(!H || !A) continue;
+    H.p++; A.p++; H.gf += f.hs; H.ga += f.as; A.gf += f.as; A.ga += f.hs;
+    if(f.hs > f.as){ H.w++; A.l++; H.pts += 3; }
+    else if(f.hs < f.as){ A.w++; H.l++; A.pts += 3; }
+    else { H.d++; A.d++; H.pts++; A.pts++; }
+  }
+  return Object.values(t).sort((a,b)=>
+    b.pts - a.pts || (b.gf-b.ga) - (a.gf-a.ga) || b.gf - a.gf ||
+    (DATA.teams[a.id].name < DATA.teams[b.id].name ? -1 : 1));
+}
+
+function scoreOrder(order){
+  const actual = liveTable().map(r => r.id);
+  if(!order || order.length !== 20) return null;
+  const actPos = {}; actual.forEach((id,i)=> actPos[id] = i+1);
+  let base = 0, per = {};
+  order.forEach((id,i) => {
+    const diff = Math.abs((i+1) - actPos[id]);
+    const pt = Math.max(0, 5 - diff);
+    per[id] = {pred:i+1, act:actPos[id], diff, pts:pt};
+    base += pt;
+  });
+  const champ = order[0] === actual[0] ? 5 : 0;
+  const top4  = [0,1,2,3].every(i => order[i] === actual[i]) ? 5 : 0;
+  const real  = actual.slice(17).slice().sort().join(",");
+  const drop  = order.slice(17).slice().sort().join(",") === real ? 5 : 0;
+  return {base, champ, top4, drop, total: base+champ+top4+drop, per};
+}
+
+function defaultOrder(){ return liveTable().map(r => r.id); }
+
+function moveTeam(i, dir){
+  const j = i + dir;
+  if(j < 0 || j >= myOrder.length) return;
+  [myOrder[i], myOrder[j]] = [myOrder[j], myOrder[i]];
+  orderDirty = true;
+  renderTable();
+}
+async function saveOrder(){
+  if(!user){ $("authmodal").classList.remove("hidden"); return; }
+  if(stLocked()){ alert("Predictions locked — the deadline has passed."); return; }
+  profile.standings = myOrder.slice();
+  await db.collection("users").doc(user.uid).set({standings: profile.standings}, {merge:true});
+  orderDirty = false;
+  await refreshUsers();
+  renderTable(); renderBoard();
+}
+function resetOrder(){ myOrder = defaultOrder(); orderDirty = true; renderTable(); }
+
+function renderTable(){
+  const locked = stLocked();
+  const lockTime = new Date(STANDINGS_LOCK).toLocaleString(undefined,
+    {weekday:"long", day:"numeric", month:"short", hour:"numeric", minute:"2-digit"});
+  $("stlock").textContent = locked
+    ? "Predictions are locked. Scores update live as results come in — final score in May."
     : `Entries lock ${D}{lockTime}. Reorder the table, then hit Save. You can keep changing it until the deadline.`;
   const saved = user ? (userStandings[user.uid] || null) : null;
   if(!myOrder) myOrder = (saved && saved.length === 20) ? saved.slice() : defaultOrder();
