@@ -186,6 +186,25 @@ h2 small{font-weight:400;color:var(--muted);font-size:.72rem;letter-spacing:0}
 .gwwin div{background:var(--glass);border:1px solid var(--stroke);border-radius:12px;padding:8px 13px;font-size:.8rem}
 .gwwin b{color:var(--pl-green)}
 
+/* ---------- final table game ---------- */
+.strow{display:flex;align-items:center;gap:11px;background:var(--glass);border:1px solid var(--stroke);
+  border-radius:12px;padding:7px 11px;margin-bottom:6px;transition:.18s;position:relative;overflow:hidden}
+.strow::after{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--tc);opacity:.9}
+.strow:hover{background:var(--glass2)}
+.strow .pos{width:24px;text-align:center;font-weight:900;color:var(--muted);font-size:.85rem;flex-shrink:0}
+.strow img{width:26px;height:26px;object-fit:contain;flex-shrink:0}
+.strow .nm{font-weight:700;font-size:.9rem;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.strow .mv{display:flex;gap:4px;flex-shrink:0}
+.strow .mv button{width:26px;height:26px;border-radius:7px;background:rgba(0,0,0,.3);border:1px solid var(--stroke);
+  color:var(--text);cursor:pointer;font-size:.7rem;font-family:inherit;line-height:1;padding:0}
+.strow .mv button:hover:not(:disabled){background:var(--pl-green);color:#0a0010}
+.strow .mv button:disabled{opacity:.25;cursor:default}
+.stbar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+.stnote{font-size:.72rem;color:var(--muted)}
+.stpts{margin-left:auto;font-weight:900;font-size:.8rem;flex-shrink:0}
+.stpts.g{color:var(--pl-green)} .stpts.z{color:var(--muted)}
+.stdiff{font-size:.68rem;color:var(--muted);flex-shrink:0;min-width:36px;text-align:right}
+
 /* ---------- stats ---------- */
 .watch{position:relative;display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin-bottom:22px;padding:22px;
   border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.16);
@@ -250,6 +269,7 @@ h2 small{font-weight:400;color:var(--muted);font-size:.72rem;letter-spacing:0}
   </div>
   <div class="spacer"></div>
   <div class="countdown" id="countdown"><span class="lbl">Next kickoff</span><span class="val" id="cdval">—</span></div>
+  <button class="btn ghost" id="newsbtn" style="padding:7px 13px;font-size:.75rem">What's new</button>
   <div class="userchip" id="userchip"><div class="avatar" id="avatar">?</div><span id="uname">Sign in</span></div>
 </header>
 
@@ -258,6 +278,7 @@ h2 small{font-weight:400;color:var(--muted);font-size:.72rem;letter-spacing:0}
   <button data-tab="board">🏆 Leaderboard</button>
   <button data-tab="stats">📊 Stats</button>
   <button data-tab="fantasy">🎮 Fantasy</button>
+  <button data-tab="table">📋 Final Table</button>
 </nav>
 
 <main>
@@ -279,7 +300,7 @@ h2 small{font-weight:400;color:var(--muted);font-size:.72rem;letter-spacing:0}
     <h2>Gameweek Winners</h2>
     <div class="gwwin" id="gwwinners"></div>
     <h2>Master Scoreboard <small>prediction rank + FPL rank — lowest wins</small></h2>
-    <table id="mastertable"><thead><tr><th>#</th><th>Player</th><th>Pred pts</th><th>FPL pts</th><th>Rank sum</th></tr></thead><tbody></tbody></table>
+    <table id="mastertable"><thead><tr><th>#</th><th>Player</th><th>Pred pts</th><th>FPL pts</th><th>Table pts</th><th>Rank sum</th></tr></thead><tbody></tbody></table>
   </section>
 
   <section id="tab-stats" class="hidden">
@@ -300,6 +321,15 @@ h2 small{font-weight:400;color:var(--muted);font-size:.72rem;letter-spacing:0}
     <p class="hint" style="margin-top:12px">Join link: <a href="https://fantasy.premierleague.com/leagues/auto-join/t9yxf2" style="color:var(--pl-cyan)">fantasy.premierleague.com/leagues/auto-join/t9yxf2</a> · Add your FPL Entry ID in your profile to appear on the master scoreboard.</p>
   </section>
 
+  <section id="tab-table" class="hidden">
+    <div id="stlock" class="banner info"></div>
+    <div id="steditor"></div>
+    <h2>Standings League <small>5 pts per team, minus places off · +5 champion · +5 top four · +5 relegation</small></h2>
+    <table id="sttable"><thead><tr><th>#</th><th>Player</th><th>Champ</th><th>Top 4</th><th>Drop</th><th>Total</th></tr></thead><tbody></tbody></table>
+    <h2>Live Premier League Table</h2>
+    <table id="livetable"><thead><tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead><tbody></tbody></table>
+  </section>
+
   <div class="updated" id="updated"></div>
 </main>
 
@@ -315,6 +345,14 @@ h2 small{font-weight:400;color:var(--muted);font-size:.72rem;letter-spacing:0}
       <button class="btn ghost" id="switchauth">Create account</button>
       <button class="btn ghost" id="closeauth">✕</button>
     </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="newsmodal">
+  <div class="box" style="width:440px">
+    <h3>What's new</h3>
+    <div id="newslist" style="max-height:60vh;overflow-y:auto"></div>
+    <div class="row"><button class="btn ghost" id="closenews">Close</button></div>
   </div>
 </div>
 
@@ -369,7 +407,8 @@ const DEMO = FIREBASE_CONFIG.apiKey.startsWith("PASTE");
 const $ = id => document.getElementById(id);
 
 let DATA = null, user = null, profile = {}, myPicks = {}, allPicks = [],
-    userNames = {}, userFpl = {}, curGW = 1, db = null, auth = null, demoPicks = {}, registering = false;
+    userNames = {}, userFpl = {}, userStandings = {}, curGW = 1, db = null, auth = null,
+    demoPicks = {}, registering = false;
 
 /* ---------- boot ---------- */
 init();
@@ -416,6 +455,30 @@ function tickCountdown(){
   const d = Math.floor(ms/864e5), h = Math.floor(ms/36e5)%24, m = Math.floor(ms/6e4)%60, s = Math.floor(ms/1e3)%60;
   $("cdval").textContent = d > 0 ? `${d}d ${h}h ${m}m` : `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
 }
+
+/* ---------- changelog ---------- */
+const CHANGELOG = [
+  ["22 Aug 2026", [
+    "New Final Table game — predict the 20-team finishing order. Locks Fri 28 Aug, 1:30pm ET.",
+    "Results now appear at full time instead of hours later.",
+    "Locked matches no longer show your own pick where the score goes — that was confusing people (sorry).",
+    "Joint gameweek winners are now both named instead of one picked at random."
+  ]],
+  ["20 Aug 2026", [
+    "Master scoreboard hides the rank sum until GW1 has been played.",
+    "Fixed Coventry's badge, which was showing the wrong club.",
+    "Site went live with predictions, leaderboard, stats and the FPL mini-league."
+  ]]
+];
+$("newsbtn").onclick = () => {
+  $("newslist").innerHTML = CHANGELOG.map(([date, items]) => `
+    <div style="margin-bottom:16px">
+      <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:1.4px;color:var(--pl-green);font-weight:700;margin-bottom:6px">${date}</div>
+      ${items.map(i => `<div style="font-size:.83rem;color:var(--muted);padding:3px 0 3px 12px;border-left:1px solid var(--stroke);line-height:1.5">${i}</div>`).join("")}
+    </div>`).join("");
+  $("newsmodal").classList.remove("hidden");
+};
+$("closenews").onclick = () => $("newsmodal").classList.add("hidden");
 
 /* ---------- auth ---------- */
 $("userchip").onclick = () => {
@@ -464,6 +527,7 @@ async function onAuthChange(){
     profile = doc.exists ? doc.data() : {name: user.email.split("@")[0]};
     await refreshUsers(); await refreshPicks();
   } else { profile = {}; myPicks = {}; allPicks = []; }
+  myOrder = null; orderDirty = false;
   updateUserUI(); renderAll();
 }
 function updateUserUI(){
@@ -473,8 +537,12 @@ function updateUserUI(){
 }
 async function refreshUsers(){
   const snap = await db.collection("users").get();
-  userNames = {}; userFpl = {};
-  snap.forEach(d => { userNames[d.id] = d.data().name; userFpl[d.id] = d.data().fplEntry || null; });
+  userNames = {}; userFpl = {}; userStandings = {};
+  snap.forEach(d => {
+    const v = d.data();
+    userNames[d.id] = v.name; userFpl[d.id] = v.fplEntry || null;
+    if(Array.isArray(v.standings) && v.standings.length === 20) userStandings[d.id] = v.standings;
+  });
 }
 async function refreshPicks(){
   const snap = await db.collection("picks").get();
@@ -486,7 +554,7 @@ async function refreshPicks(){
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   document.querySelectorAll("nav button").forEach(x => x.classList.remove("active"));
   b.classList.add("active");
-  ["predict","board","stats","fantasy"].forEach(t => $("tab-"+t).classList.toggle("hidden", t !== b.dataset.tab));
+  ["predict","board","stats","fantasy","table"].forEach(t => $("tab-"+t).classList.toggle("hidden", t !== b.dataset.tab));
 });
 
 /* ---------- gameweeks ---------- */
@@ -628,8 +696,10 @@ function renderBoard(){
   const master = Object.keys(userNames).map(uid => {
     const t = totals[uid] || {pts:0};
     const f = userFpl[uid] ? byEntry[String(userFpl[uid])] : null;
+    const st = userStandings[uid] ? scoreOrder(userStandings[uid]) : null;
     return {uid, name:userNames[uid], pred:t.pts, predRank:predRank[uid]||n,
-            fpl:f?f.total:null, fplRank:f&&f.rank?f.rank:null};
+            fpl:f?f.total:null, fplRank:f&&f.rank?f.rank:null,
+            tbl: st ? st.total : null};
   });
   const linked = master.filter(m => m.fplRank != null).length;
   master.forEach(m => m.sum = m.predRank + (m.fplRank ?? (linked+1)));
@@ -678,7 +748,136 @@ function renderFantasy(){
   $("fpltable").querySelector("tbody").innerHTML = html;
 }
 
-function renderAll(){ renderFixtures(); renderBoard(); renderStats(); renderFantasy(); }
+/* ================================================================
+   FINAL TABLE GAME
+   Predict the 20-team finishing order before the GW2 deadline.
+   Scoring per team: 5 - |predicted - actual|, floored at 0  (max 100)
+   Bonuses: +5 champion, +5 exact top four, +5 all three relegated
+   ================================================================ */
+const STANDINGS_LOCK = "2026-08-28T17:30:00Z";   // GW2 deadline
+const stLocked = () => Date.now() >= new Date(STANDINGS_LOCK).getTime();
+let myOrder = null, orderDirty = false;
+
+function liveTable(){
+  const t = {};
+  for(const id of Object.keys(DATA.teams)) t[id] = {id:+id, p:0,w:0,d:0,l:0,gf:0,ga:0,pts:0};
+  for(const f of DATA.fixtures){
+    if(!f.finished || f.hs == null || f.as == null) continue;
+    const H = t[f.h], A = t[f.a];
+    if(!H || !A) continue;
+    H.p++; A.p++; H.gf += f.hs; H.ga += f.as; A.gf += f.as; A.ga += f.hs;
+    if(f.hs > f.as){ H.w++; A.l++; H.pts += 3; }
+    else if(f.hs < f.as){ A.w++; H.l++; A.pts += 3; }
+    else { H.d++; A.d++; H.pts++; A.pts++; }
+  }
+  return Object.values(t).sort((a,b)=>
+    b.pts - a.pts || (b.gf-b.ga) - (a.gf-a.ga) || b.gf - a.gf ||
+    (DATA.teams[a.id].name < DATA.teams[b.id].name ? -1 : 1));
+}
+
+function scoreOrder(order){
+  const actual = liveTable().map(r => r.id);
+  if(!order || order.length !== 20) return null;
+  const actPos = {}; actual.forEach((id,i)=> actPos[id] = i+1);
+  let base = 0, per = {};
+  order.forEach((id,i) => {
+    const diff = Math.abs((i+1) - actPos[id]);
+    const pt = Math.max(0, 5 - diff);
+    per[id] = {pred:i+1, act:actPos[id], diff, pts:pt};
+    base += pt;
+  });
+  const champ = order[0] === actual[0] ? 5 : 0;
+  const top4  = [0,1,2,3].every(i => order[i] === actual[i]) ? 5 : 0;
+  const real  = actual.slice(17).slice().sort().join(",");
+  const drop  = order.slice(17).slice().sort().join(",") === real ? 5 : 0;
+  return {base, champ, top4, drop, total: base+champ+top4+drop, per};
+}
+
+function defaultOrder(){ return liveTable().map(r => r.id); }
+
+function moveTeam(i, dir){
+  const j = i + dir;
+  if(j < 0 || j >= myOrder.length) return;
+  [myOrder[i], myOrder[j]] = [myOrder[j], myOrder[i]];
+  orderDirty = true;
+  renderTable();
+}
+async function saveOrder(){
+  if(!user){ $("authmodal").classList.remove("hidden"); return; }
+  if(stLocked()){ alert("Predictions locked — the deadline has passed."); return; }
+  profile.standings = myOrder.slice();
+  await db.collection("users").doc(user.uid).set({standings: profile.standings}, {merge:true});
+  orderDirty = false;
+  await refreshUsers();
+  renderTable(); renderBoard();
+}
+function resetOrder(){ myOrder = defaultOrder(); orderDirty = true; renderTable(); }
+
+function renderTable(){
+  const locked = stLocked();
+  const lockTime = new Date(STANDINGS_LOCK).toLocaleString(undefined,
+    {weekday:"long", day:"numeric", month:"short", hour:"numeric", minute:"2-digit"});
+  $("stlock").textContent = locked
+    ? "Predictions are locked. Scores update live as results come in — final score in May."
+    : `Entries lock ${D}{lockTime}. Reorder the table, then hit Save. You can keep changing it until the deadline.`;
+  const saved = user ? (userStandings[user.uid] || null) : null;
+  if(!myOrder) myOrder = (saved && saved.length === 20) ? saved.slice() : defaultOrder();
+  const sc = scoreOrder(locked ? (saved || myOrder) : myOrder);
+  const shown = locked ? (saved || myOrder) : myOrder;
+  let bar = "";
+  if(!user && !DEMO){
+    bar = `<div class="stbar"><span class="stnote">Sign in to enter your table.</span></div>`;
+  } else if(!locked){
+    bar = `<div class="stbar">
+      <button class="btn" onclick="saveOrder()">${D}{orderDirty ? "Save table" : "Saved ✓"}</button>
+      <button class="btn ghost" onclick="resetOrder()">Reset to live table</button>
+      <span class="stnote">${D}{saved ? "Entry submitted — edits allowed until the deadline." : "Not submitted yet."}</span>
+    </div>`;
+  } else {
+    bar = `<div class="stbar"><span class="stnote">${D}{saved ? "Your entry is locked in." : "You didn't enter before the deadline."}</span></div>`;
+  }
+  const rows = shown.map((id,i) => {
+    const TM = DATA.teams[id] || {name:"?"};
+    const s = sc ? sc.per[id] : null;
+    const cls = i < 4 ? "ucl" : i >= 17 ? "rel" : "";
+    const arrows = locked ? "" : `<div class="mv">
+        <button onclick="moveTeam(${D}{i},-1)" ${D}{i===0?"disabled":""} aria-label="Move up">▲</button>
+        <button onclick="moveTeam(${D}{i},1)" ${D}{i===shown.length-1?"disabled":""} aria-label="Move down">▼</button>
+      </div>`;
+    const scoreBit = (locked && s)
+      ? `<span class="stdiff">${D}{s.act ? "now " + s.act : ""}</span><span class="stpts ${D}{s.pts?"g":"z"}">${D}{s.pts}</span>`
+      : (s && s.act ? `<span class="stdiff">now ${D}{s.act}</span>` : "");
+    return `<div class="strow ${D}{cls}" style="--tc:${D}{COL(TM.code)}">
+      <span class="pos">${D}{i+1}</span>
+      <img src="${D}{CREST(TM.code)}" alt="" onerror="crestFail(this,'${D}{TM.short||SHORT(TM.name)}','${D}{COL(TM.code)}')">
+      <span class="nm">${D}{TM.name}</span>
+      ${D}{scoreBit}${D}{arrows}
+    </div>`;
+  }).join("");
+  const summary = sc ? `<div class="stbar" style="margin-top:12px">
+      <span class="stnote">Currently worth <b style="color:var(--pl-green)">${D}{sc.total}</b>/115 —
+      ${D}{sc.base} from positions${D}{sc.champ?", +5 champion":""}${D}{sc.top4?", +5 top four":""}${D}{sc.drop?", +5 relegation":""}.
+      ${D}{DATA.fixtures.filter(f=>f.finished).length < 40 ? "Early days, so this will swing wildly." : ""}</span>
+    </div>` : "";
+  $("steditor").innerHTML = bar + rows + summary;
+  const board = Object.keys(userNames).map(uid => {
+    const o = userStandings[uid];
+    const s = o ? scoreOrder(o) : null;
+    return {uid, name:userNames[uid], s};
+  }).sort((a,b) => (b.s ? b.s.total : -1) - (a.s ? a.s.total : -1));
+  $("sttable").querySelector("tbody").innerHTML = board.map((r,i) =>
+    r.s ? `<tr class="${D}{user&&r.uid===user.uid?"me":""} ${D}{i===0?"rank1":""}"><td>${D}{i+1}</td><td>${D}{r.name}</td>
+      <td>${D}{r.s.champ?"✓":"–"}</td><td>${D}{r.s.top4?"✓":"–"}</td><td>${D}{r.s.drop?"✓":"–"}</td><td><b>${D}{r.s.total}</b></td></tr>`
+    : `<tr><td>–</td><td>${D}{r.name}</td><td colspan="4" class="empty">no entry yet</td></tr>`
+  ).join("") || `<tr><td colspan="6" class="empty">Nobody has entered a table yet.</td></tr>`;
+  $("livetable").querySelector("tbody").innerHTML = liveTable().map((r,i) => {
+    const TM = DATA.teams[r.id];
+    return `<tr class="${D}{i===0?"rank1":""}"><td>${D}{i+1}</td><td>${D}{TM.name}</td><td>${D}{r.p}</td><td>${D}{r.w}</td>
+      <td>${D}{r.d}</td><td>${D}{r.l}</td><td>${D}{r.gf-r.ga>0?"+":""}${D}{r.gf-r.ga}</td><td><b>${D}{r.pts}</b></td></tr>`;
+  }).join("");
+}
+
+function renderAll(){ renderFixtures(); renderBoard(); renderStats(); renderFantasy(); renderTable(); }
 
 /* ================================================================
    SEED — real 2026/27 GW1 fixtures, used until data/data.json loads
