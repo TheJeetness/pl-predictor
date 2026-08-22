@@ -65,11 +65,18 @@ def main():
     for f in fpl_fixtures:
         if not f.get("event"):
             continue  # unscheduled
+        # FPL only sets `finished` once bonus points are confirmed, hours after
+        # the whistle. `finished_provisional` flips at full time and the score
+        # never changes after it, so treat either as done - but only if we
+        # actually have a scoreline.
+        done = bool(f["finished"] or f.get("finished_provisional"))
+        if f["team_h_score"] is None or f["team_a_score"] is None:
+            done = False
         fixtures.append({
             "id": f["id"], "gw": f["event"], "kickoff": f["kickoff_time"],
             "h": f["team_h"], "a": f["team_a"],
             "hs": f["team_h_score"], "as": f["team_a_score"],
-            "finished": bool(f["finished"]),
+            "finished": done,
         })
     out["fixtures"] = fixtures
 
