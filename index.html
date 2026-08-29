@@ -342,6 +342,7 @@ h2 small{font-weight:400;color:var(--muted);font-size:.72rem;letter-spacing:0}
     <div class="row">
       <button class="btn" id="doauth">Sign in</button>
       <button class="btn ghost" id="switchauth">Create account</button>
+      <button class="btn ghost" id="forgot">Forgot password?</button>
       <button class="btn ghost" id="closeauth">✕</button>
     </div>
   </div>
@@ -463,6 +464,9 @@ function tickCountdown(){
 
 /* ---------- changelog ---------- */
 const CHANGELOG = [
+  ["28 Aug 2026", [
+    "Added a Forgot password? link on the sign-in box — it emails you a reset link."
+  ]],
   ["27 Aug 2026", [
     "The Predictions tab now jumps to the next gameweek automatically once the current one finishes.",
     "Removed the Master Scoreboard — the three competitions stand on their own.",
@@ -496,6 +500,18 @@ $("userchip").onclick = () => {
   user ? openProfile() : $("authmodal").classList.remove("hidden");
 };
 $("closeauth").onclick = () => $("authmodal").classList.add("hidden");
+$("forgot").onclick = async () => {
+  const email = $("f_email").value.trim();
+  const box = $("autherr");
+  box.style.color = "";
+  if(!email){ box.textContent = "Type your email in the box above first, then press this again."; return; }
+  if(DEMO || !auth){ box.textContent = "Sign-in is not configured yet."; return; }
+  try{
+    await auth.sendPasswordResetEmail(email);
+    box.style.color = "var(--pl-green)";
+    box.textContent = "Reset link sent to " + email + " — check spam if it does not show up.";
+  }catch(e){ box.textContent = e.message; }
+};
 $("switchauth").onclick = () => {
   registering = !registering;
   $("f_name").classList.toggle("hidden", !registering);
