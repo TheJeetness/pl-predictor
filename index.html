@@ -108,6 +108,9 @@ section{animation:rise .45s cubic-bezier(.2,.8,.3,1)}
 .tag.open{background:rgba(0,255,133,.15);color:var(--pl-green);border:1px solid rgba(0,255,133,.32)}
 .tag.lock{background:rgba(233,0,82,.15);color:#ff6b95;border:1px solid rgba(233,0,82,.32)}
 .tag.ft{background:rgba(255,255,255,.1);color:var(--text);border:1px solid var(--stroke)}
+.tag.live{background:rgba(233,0,82,.22);color:#ff7fa4;border:1px solid rgba(233,0,82,.5);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+.result.live{border-color:rgba(233,0,82,.45);box-shadow:0 0 18px rgba(233,0,82,.18)}
 .fx-main{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px}
 .teamcol{display:flex;align-items:center;gap:12px;min-width:0}
 .teamcol.away{flex-direction:row-reverse;text-align:right}
@@ -464,6 +467,11 @@ function tickCountdown(){
 
 /* ---------- changelog ---------- */
 const CHANGELOG = [
+  ["4 Sep 2026", [
+    "Fixed betting odds being matched to the wrong fixture — Man City v Coventry was showing the Man Utd v Man City prices.",
+    "Scores now refresh hourly instead of every six hours.",
+    "Matches in progress show the live score with a Live badge, instead of Awaiting result."
+  ]],
   ["28 Aug 2026", [
     "Added a Forgot password? link on the sign-in box — it emails you a reset link."
   ]],
@@ -612,11 +620,13 @@ function renderFixtures(){
     const pts = pickPoints(pick, fx);
     const others = locked ? allPicks.filter(p => p.fid === fx.id && (!user || p.uid !== user.uid)) : [];
     const hasPick = pick.h != null && pick.h !== "" && pick.a != null && pick.a !== "";
+    // kicked off, we have a score, but the match is not final yet
+    const live = !fx.finished && fx.hs != null && fx.as != null;
     return `
     <div class="fixture ${locked?"locked":""} ${fx.finished?"done":""}" style="--ch:${COL(H.code)};--ca:${COL(A.code)}">
       <div class="fx-top">
         <span>${new Date(fx.kickoff).toLocaleString(undefined,{weekday:"short",day:"numeric",month:"short",hour:"numeric",minute:"2-digit"})}</span>
-        <span class="tag ${fx.finished?"ft":locked?"lock":"open"}">${fx.finished?"Full time":locked?"🔒 Locked":"Open"}</span>
+        <span class="tag ${fx.finished?"ft":live?"live":locked?"lock":"open"}">${fx.finished?"Full time":live?"● Live":locked?"🔒 Locked":"Open"}</span>
       </div>
       <div class="fx-main">
         <div class="teamcol">
@@ -626,7 +636,9 @@ function renderFixtures(){
         <div class="scorebox">
           ${fx.finished
             ? `<span class="result">${fx.hs} – ${fx.as}</span>`
-            : locked
+            : live
+              ? `<span class="result live">${fx.hs} – ${fx.as}</span>`
+              : locked
               ? `<span class="pending">awaiting<br>result</span>`
               : `<input type="number" min="0" max="15" inputmode="numeric" value="${pick.h ?? ""}" onchange="savePick(${fx.id},'h',this.value)">
                  <span class="dash">–</span>
