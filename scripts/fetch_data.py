@@ -22,25 +22,47 @@ def get(url):
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read().decode())
 
-def norm(name):
-    n = name.lower()
-    n = re.sub(r"\b(fc|afc)\b", "", n).replace("&", "and")
-    n = re.sub(r"[^a-z ]", "", n)
-    aliases = {
-        "man utd": "manchester united", "man city": "manchester city",
-        "spurs": "tottenham hotspur", "tottenham": "tottenham hotspur",
-        "wolves": "wolverhampton wanderers", "nottm forest": "nottingham forest",
-        "brighton": "brighton and hove albion", "west ham": "west ham united",
-        "newcastle": "newcastle united", "leeds": "leeds united",
-        "sheffield utd": "sheffield united", "west brom": "west bromwich albion",
-        "luton": "luton town", "ipswich": "ipswich town",
-    }
-    n = " ".join(n.split())
-    return aliases.get(n, n)
+# Club names differ between the FPL feed ("Man City") and the odds feed
+# ("Manchester City"). Fuzzy word-overlap matching is NOT safe: "Man City" and
+# "Manchester United" share "Manchester"; "Coventry City" and "Manchester City"
+# share "City". That silently paired the wrong fixtures. Exact canonical keys only.
+CANON = {
+    "arsenal": "arsenal",
+    "aston villa": "villa",
+    "bournemouth": "bournemouth", "afc bournemouth": "bournemouth",
+    "brentford": "brentford",
+    "brighton": "brighton", "brighton and hove albion": "brighton",
+    "burnley": "burnley",
+    "chelsea": "chelsea",
+    "coventry": "coventry", "coventry city": "coventry",
+    "crystal palace": "palace",
+    "everton": "everton",
+    "fulham": "fulham",
+    "hull": "hull", "hull city": "hull",
+    "ipswich": "ipswich", "ipswich town": "ipswich",
+    "leeds": "leeds", "leeds united": "leeds",
+    "leicester": "leicester", "leicester city": "leicester",
+    "liverpool": "liverpool",
+    "luton": "luton", "luton town": "luton",
+    "man city": "mancity", "manchester city": "mancity",
+    "man utd": "manutd", "man united": "manutd", "manchester united": "manutd",
+    "newcastle": "newcastle", "newcastle united": "newcastle",
+    "nottm forest": "forest", "notts forest": "forest", "nottingham forest": "forest",
+    "sheffield utd": "sheffutd", "sheffield united": "sheffutd",
+    "southampton": "southampton",
+    "spurs": "spurs", "tottenham": "spurs", "tottenham hotspur": "spurs",
+    "sunderland": "sunderland",
+    "west brom": "westbrom", "west bromwich albion": "westbrom",
+    "west ham": "westham", "west ham united": "westham",
+    "wolves": "wolves", "wolverhampton wanderers": "wolves",
+}
 
-def similar(a, b):
-    ta, tb = set(norm(a).split()), set(norm(b).split())
-    return norm(a) == norm(b) or (ta and tb and len(ta & tb) / min(len(ta), len(tb)) >= 0.5)
+def canon(name):
+    n = (name or "").lower().replace("&", "and")
+    n = re.sub(r"\b(fc|afc)\b", " ", n)
+    n = re.sub(r"[^a-z ]", "", n)
+    n = " ".join(n.split())
+    return CANON.get(n, n)
 
 def main():
     out = {"updated": datetime.datetime.now(datetime.timezone.utc).isoformat()}
@@ -129,23 +151,51 @@ def main():
     out["stats"] = stats
 
     # ---------- odds ----------
+    # Runs hourly now so results land quickly, but the odds API allows only 500
+    # calls a month. Refresh odds every 6th hour and carry the previous ones over
+    # otherwise - and also on failure, so a bad response never wipes the board.
+    previous = {}
+    try:
+        with open("data/data.json") as fh:
+            previous = json.load(fh)
+    except Exception:
+        pass
+    carried = previous.get("odds") or {}
+
     odds_out = {}
     key = os.environ.get("ODDS_API_KEY", "").strip()
-    if key:
+    hour = datetime.datetime.now(datetime.timezone.utc).hour
+    refresh_odds = (hour % 6 == 0) or os.environ.get("ODDS_FORCE") == "1"
+    if key and not refresh_odds:
+        print(f"Hour {hour:02d} - keeping existing odds ({len(carried)} fixtures) to save quota")
+        odds_out = carried
+    elif key:
         try:
             url = (f"https://api.the-odds-api.com/v4/sports/soccer_epl/odds/"
                    f"?apiKey={key}&regions=uk&markets=h2h&oddsFormat=decimal")
             events = get(url)
+            unmatched = []
             for ev in events:
+                eh, ea = canon(ev["home_team"]), canon(ev["away_team"])
+                ek = ev.get("commence_time")
                 match = None
                 for f in fixtures:
                     if f["finished"] or not f["kickoff"]:
                         continue
-                    if similar(teams[f["h"]]["name"], ev["home_team"]) and \
-                       similar(teams[f["a"]]["name"], ev["away_team"]):
-                        match = f
-                        break
+                    if canon(teams[f["h"]]["name"]) != eh or canon(teams[f["a"]]["name"]) != ea:
+                        continue
+                    if ek:
+                        try:
+                            d1 = datetime.datetime.fromisoformat(ek.replace("Z", "+00:00"))
+                            d2 = datetime.datetime.fromisoformat(f["kickoff"].replace("Z", "+00:00"))
+                            if abs((d1 - d2).total_seconds()) > 6 * 3600:
+                                continue
+                        except Exception:
+                            pass
+                    match = f
+                    break
                 if not match:
+                    unmatched.append(f'{ev["home_team"]} v {ev["away_team"]}')
                     continue
                 entry = {}
                 for bk in ev.get("bookmakers", []):
@@ -163,10 +213,17 @@ def main():
                 if entry:
                     odds_out[str(match["id"])] = entry
             print(f"Odds matched for {len(odds_out)} fixtures")
+            if unmatched:
+                print("Odds events with no fixture match: " + "; ".join(unmatched), file=sys.stderr)
+            if not odds_out and carried:
+                print("Odds call returned nothing - keeping previous odds")
+                odds_out = carried
         except Exception as e:
-            print(f"WARNING: odds fetch failed: {e}", file=sys.stderr)
+            print(f"WARNING: odds fetch failed, keeping previous odds: {e}", file=sys.stderr)
+            odds_out = carried
     else:
         print("No ODDS_API_KEY set - skipping odds")
+        odds_out = carried
     out["odds"] = odds_out
 
     # ---------- FPL mini-league ----------
