@@ -208,6 +208,33 @@ h2 small{font-weight:400;color:var(--muted);font-size:.72rem;letter-spacing:0}
 .stpts.g{color:var(--pl-green)} .stpts.z{color:var(--muted)}
 .stdiff{font-size:.68rem;color:var(--muted);flex-shrink:0;min-width:36px;text-align:right}
 
+/* ---------- by-team heatmap ---------- */
+.tgwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tgrid{border-collapse:separate;border-spacing:3px;width:100%}
+.tgrid th{background:none;padding:6px 4px;font-size:.6rem;letter-spacing:.6px;text-align:center;white-space:nowrap}
+.tgrid th.who{color:var(--text)}
+.tgrid th.off{color:var(--muted);opacity:.5}
+.tgrid td{border:none;padding:0;font-size:.78rem}
+.tgrid td.club{display:flex;align-items:center;gap:7px;padding:4px 6px;min-width:112px;font-weight:600}
+.tgrid td.club img{width:20px;height:20px;object-fit:contain;flex-shrink:0}
+.tgrid td.club span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell{text-align:center;border-radius:8px;padding:7px 4px;background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.06);font-variant-numeric:tabular-nums;min-width:42px}
+.cell.thin{color:var(--muted);opacity:.6}
+.cell.none{color:var(--muted);opacity:.3}
+.cell b{font-weight:800}
+.cell i{display:block;font-style:normal;font-size:.58rem;color:var(--muted);margin-top:1px}
+.tgrid tr.off td.club, .tgrid tr.off .cell{opacity:.45}
+.insight{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:16px}
+.icard{background:var(--glass);border:1px solid var(--stroke);border-radius:16px;padding:14px 16px;display:flex;align-items:center;gap:12px}
+.icard img{width:34px;height:34px;object-fit:contain}
+.icard .lbl{font-size:.6rem;text-transform:uppercase;letter-spacing:1.3px;color:var(--muted);font-weight:700}
+.icard .val{font-weight:800;font-size:.95rem}
+.icard .sub{font-size:.7rem;color:var(--muted)}
+.modebtn{background:var(--glass);border:1px solid var(--stroke);color:var(--muted);padding:6px 13px;
+  border-radius:20px;font-size:.75rem;font-weight:600;font-family:inherit;cursor:pointer}
+.modebtn.on{background:linear-gradient(95deg,var(--pl-green),var(--pl-cyan));color:#0a0010;border-color:transparent}
+
 /* ---------- stats ---------- */
 .watch{position:relative;display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin-bottom:22px;padding:22px;
   border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.16);
@@ -282,6 +309,7 @@ h2 small{font-weight:400;color:var(--muted);font-size:.72rem;letter-spacing:0}
   <button data-tab="stats">📊 Stats</button>
   <button data-tab="fantasy">🎮 Fantasy</button>
   <button data-tab="table">📋 Final Table</button>
+  <button data-tab="teams">🎯 By Team</button>
 </nav>
 
 <main>
@@ -330,6 +358,13 @@ h2 small{font-weight:400;color:var(--muted);font-size:.72rem;letter-spacing:0}
     <table id="sttable"><thead><tr><th>#</th><th>Player</th><th>Champ</th><th>Top 4</th><th>Drop</th><th>Total</th></tr></thead><tbody></tbody></table>
     <h2>Live Premier League Table</h2>
     <table id="livetable"><thead><tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section id="tab-teams" class="hidden">
+    <div id="teamNote" class="banner info"></div>
+    <div id="teamInsight"></div>
+    <div class="stbar" id="teamModes"></div>
+    <div id="teamGrid"></div>
   </section>
 
   <div class="updated" id="updated"></div>
@@ -467,6 +502,10 @@ function tickCountdown(){
 
 /* ---------- changelog ---------- */
 const CHANGELOG = [
+  ["6 Sep 2026", [
+    "New By Team tab — a grid of how well each player predicts each club, with your specialist and blind spot up top.",
+    "Players who have predicted under a quarter of matches are faded rather than hidden."
+  ]],
   ["4 Sep 2026", [
     "Fixed betting odds being matched to the wrong fixture — Man City v Coventry was showing the Man Utd v Man City prices.",
     "Scores now refresh hourly instead of every six hours.",
@@ -587,7 +626,7 @@ async function refreshPicks(){
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   document.querySelectorAll("nav button").forEach(x => x.classList.remove("active"));
   b.classList.add("active");
-  ["predict","board","stats","fantasy","table"].forEach(t => $("tab-"+t).classList.toggle("hidden", t !== b.dataset.tab));
+  ["predict","board","stats","fantasy","table","teams"].forEach(t => $("tab-"+t).classList.toggle("hidden", t !== b.dataset.tab));
 });
 
 /* ---------- gameweeks ---------- */
@@ -897,7 +936,106 @@ function renderTable(){
   }).join("");
 }
 
-function renderAll(){ renderFixtures(); renderBoard(); renderStats(); renderFantasy(); renderTable(); }
+/* ================================================================
+   BY TEAM - how well each player reads each club
+   ================================================================ */
+const MIN_TEAM_GAMES = 5;   // matches of a club before a cell is shaded
+const MIN_SHARE = 0.25;     // share of played matches before a player counts as active
+let teamMode = "ppm";       // ppm | exact | pts
+
+function teamStats(){
+  const played = DATA.fixtures.filter(f => f.finished);
+  const idx = {};
+  for(const p of allPicks) idx[p.uid + "_" + p.fid] = p;
+  const cells = {}, made = {};
+  for(const uid of Object.keys(userNames)){ cells[uid] = {}; made[uid] = 0; }
+  for(const f of played){
+    for(const uid of Object.keys(userNames)){
+      const pk = idx[uid + "_" + f.id];
+      if(!pk) continue;
+      const pts = pickPoints(pk, f);
+      if(pts == null) continue;
+      made[uid]++;
+      for(const t of [f.h, f.a]){
+        const c = cells[uid][t] = cells[uid][t] || {m:0, pts:0, exact:0};
+        c.m++; c.pts += pts; if(pts === 3) c.exact++;
+      }
+    }
+  }
+  const players = Object.keys(userNames).map(uid => ({
+    uid, name: userNames[uid], made: made[uid],
+    share: played.length ? made[uid] / played.length : 0,
+    active: played.length ? made[uid] / played.length >= MIN_SHARE : false
+  })).sort((a,b) => (b.active - a.active) || (b.made - a.made) || a.name.localeCompare(b.name));
+  return {cells, players, played: played.length};
+}
+
+function cellShade(c){
+  if(!c || c.m < MIN_TEAM_GAMES) return "";
+  const r = Math.max(0, Math.min(1, (c.pts / c.m) / 2));
+  return `background:hsla(${Math.round(120*r)},70%,45%,${(0.16+0.24*r).toFixed(2)})`;
+}
+
+function bestWorst(uid, cells){
+  const rows = Object.entries(cells[uid] || {})
+    .filter(([,c]) => c.m >= MIN_TEAM_GAMES)
+    .map(([t,c]) => ({t:+t, ppm: c.pts / c.m, m:c.m, pts:c.pts, exact:c.exact}))
+    .sort((a,b) => b.ppm - a.ppm || b.exact - a.exact || b.m - a.m);
+  if(rows.length < 2) return null;
+  return {best: rows[0], worst: rows[rows.length - 1]};
+}
+
+function setTeamMode(m){ teamMode = m; renderTeams(); }
+
+function renderTeams(){
+  const S = teamStats();
+  const initials = n => n.split(" ").filter(Boolean).map(w=>w[0]).join("").slice(0,3).toUpperCase();
+
+  $("teamNote").textContent = S.played < 20
+    ? `Only ${S.played} matches played so far. Cells stay grey until a club has ${MIN_TEAM_GAMES} matches behind them, so this fills in properly around October.`
+    : `Shaded cells need ${MIN_TEAM_GAMES}+ matches of that club. Players who have predicted under ${Math.round(MIN_SHARE*100)}% of matches are faded.`;
+
+  const modes = [["ppm","Points per match"],["pts","Total points"],["exact","Exact scores"]];
+  $("teamModes").innerHTML = modes.map(([k,l]) =>
+    `<button class="modebtn ${teamMode===k?"on":""}" onclick="setTeamMode('${k}')">${l}</button>`).join("");
+
+  const bw = user ? bestWorst(user.uid, S.cells) : null;
+  $("teamInsight").innerHTML = bw ? `<div class="insight">
+    <div class="icard"><img src="${CREST((DATA.teams[bw.best.t]||{}).code)}" alt="">
+      <div><div class="lbl">You read them best</div>
+      <div class="val">${(DATA.teams[bw.best.t]||{}).name}</div>
+      <div class="sub">${bw.best.pts} pts from ${bw.best.m} matches · ${bw.best.exact} exact</div></div></div>
+    <div class="icard"><img src="${CREST((DATA.teams[bw.worst.t]||{}).code)}" alt="">
+      <div><div class="lbl">Your blind spot</div>
+      <div class="val">${(DATA.teams[bw.worst.t]||{}).name}</div>
+      <div class="sub">${bw.worst.pts} pts from ${bw.worst.m} matches · ${bw.worst.exact} exact</div></div></div>
+  </div>` : "";
+
+  const ids = Object.keys(DATA.teams).map(Number).sort((a,b) =>
+    (DATA.teams[a].name < DATA.teams[b].name ? -1 : 1));
+  const head = `<tr><th></th>${S.players.map(pl =>
+    `<th class="${pl.active?"who":"off"}" title="${pl.name} · ${pl.made}/${S.played} picks">${initials(pl.name)}</th>`).join("")}</tr>`;
+
+  const body = ids.map(t => {
+    const TM = DATA.teams[t];
+    const tds = S.players.map(pl => {
+      const c = S.cells[pl.uid][t];
+      if(!c || !c.m) return `<td class="cell none">–</td>`;
+      const val = teamMode === "exact" ? c.exact
+                : teamMode === "pts"   ? c.pts
+                : (c.pts / c.m).toFixed(1);
+      const thin = c.m < MIN_TEAM_GAMES ? " thin" : "";
+      return `<td class="cell${thin}" style="${cellShade(c)}" title="${pl.name} on ${TM.name}: ${c.pts} pts, ${c.exact} exact, ${c.m} matches"><b>${val}</b><i>${c.m}g</i></td>`;
+    }).join("");
+    return `<tr><td class="club"><img src="${CREST(TM.code)}" alt="" onerror="this.style.visibility='hidden'"><span>${TM.name}</span></td>${tds}</tr>`;
+  }).join("");
+
+  $("teamGrid").innerHTML = S.played
+    ? `<div class="tgwrap"><table class="tgrid">${head}${body}</table></div>`
+    : `<p class="empty">Nothing to show until matches are played.</p>`;
+}
+
+function renderAll(){ renderFixtures(); renderBoard(); renderStats(); renderFantasy(); renderTable(); renderTeams(); }
 
 /* ================================================================
    SEED — real 2026/27 GW1 fixtures, used until data/data.json loads
